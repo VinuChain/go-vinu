@@ -395,6 +395,15 @@ func (t *Transaction) CumulativeGasUsed(ctx context.Context) (*Long, error) {
 	return &ret, nil
 }
 
+func (t *Transaction) FeeRefund(ctx context.Context) (hexutil.Big, error) {
+	receipt, err := t.getReceipt(ctx)
+	if err != nil || receipt == nil {
+		return hexutil.Big{}, err
+	}
+
+	return hexutil.Big(*receipt.FeeRefund), nil
+}
+
 func (t *Transaction) CreatedContract(ctx context.Context, args BlockNumberArgs) (*Account, error) {
 	receipt, err := t.getReceipt(ctx)
 	if err != nil || receipt == nil || receipt.ContractAddress == (common.Address{}) {
