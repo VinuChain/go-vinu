@@ -18,11 +18,13 @@ package state
 
 import (
 	"github.com/ethereum/go-ethereum/common"
+	"sync"
 )
 
 type accessList struct {
 	addresses map[common.Address]int
 	slots     []map[common.Hash]struct{}
+	mu        sync.Mutex
 }
 
 // ContainsAddress returns true if the address is in the access list.
@@ -87,6 +89,9 @@ func (al *accessList) AddAddress(address common.Address) bool {
 // - slot added
 // For any 'true' value returned, a corresponding journal entry must be made.
 func (al *accessList) AddSlot(address common.Address, slot common.Hash) (addrChange bool, slotChange bool) {
+	al.mu.Lock()
+	defer al.mu.Unlock()
+
 	idx, addrPresent := al.addresses[address]
 	if !addrPresent || idx == -1 {
 		// Address not present, or addr present but no slots there
