@@ -146,10 +146,18 @@ func NewReceipt(root []byte, failed bool, cumulativeGasUsed uint64) *Receipt {
 	return r
 }
 
+// safeFeeRefund returns a copy of the FeeRefund value, defaulting to zero if nil.
+func safeFeeRefund(fr *big.Int) *big.Int {
+	if fr != nil {
+		return new(big.Int).Set(fr)
+	}
+	return new(big.Int)
+}
+
 // EncodeRLP implements rlp.Encoder, and flattens the consensus fields of a receipt
 // into an RLP stream. If no post state is present, byzantium fork is assumed.
 func (r *Receipt) EncodeRLP(w io.Writer) error {
-	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, new(big.Int).Set(r.FeeRefund), r.Bloom, r.Logs}
+	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, safeFeeRefund(r.FeeRefund), r.Bloom, r.Logs}
 	if r.Type == LegacyTxType {
 		return rlp.Encode(w, data)
 	}
@@ -203,7 +211,7 @@ func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 
 func (r *Receipt) setFromRLP(data receiptRLP) error {
 	r.CumulativeGasUsed, r.Bloom, r.Logs = data.CumulativeGasUsed, data.Bloom, data.Logs
-	r.FeeRefund = new(big.Int).Set(data.FeeRefund)
+	r.FeeRefund = safeFeeRefund(data.FeeRefund)
 	return r.setStatus(data.PostStateOrStatus)
 }
 
@@ -297,7 +305,7 @@ func decodeStoredReceiptRLP(r *ReceiptForStorage, blob []byte) error {
 		return err
 	}
 	r.CumulativeGasUsed = stored.CumulativeGasUsed
-	r.FeeRefund = new(big.Int).Set(stored.FeeRefund)
+	r.FeeRefund = safeFeeRefund(stored.FeeRefund)
 	r.Logs = make([]*Log, len(stored.Logs))
 	for i, log := range stored.Logs {
 		r.Logs[i] = (*Log)(log)
@@ -316,6 +324,7 @@ func decodeV5StoredReceiptRLP(r *ReceiptForStorage, blob []byte) error {
 		return err
 	}
 	r.CumulativeGasUsed = stored.CumulativeGasUsed
+	r.FeeRefund = big.NewInt(0)
 	r.Logs = make([]*Log, len(stored.Logs))
 	for i, log := range stored.Logs {
 		r.Logs[i] = (*Log)(log)
@@ -333,6 +342,7 @@ func decodeV4StoredReceiptRLP(r *ReceiptForStorage, blob []byte) error {
 		return err
 	}
 	r.CumulativeGasUsed = stored.CumulativeGasUsed
+	r.FeeRefund = big.NewInt(0)
 	r.TxHash = stored.TxHash
 	r.ContractAddress = stored.ContractAddress
 	r.GasUsed = stored.GasUsed
@@ -354,6 +364,7 @@ func decodeV3StoredReceiptRLP(r *ReceiptForStorage, blob []byte) error {
 		return err
 	}
 	r.CumulativeGasUsed = stored.CumulativeGasUsed
+	r.FeeRefund = big.NewInt(0)
 	r.Bloom = stored.Bloom
 	r.TxHash = stored.TxHash
 	r.ContractAddress = stored.ContractAddress
@@ -374,11 +385,7 @@ func (rs Receipts) Len() int { return len(rs) }
 // EncodeIndex encodes the i'th receipt to w.
 func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 	r := rs[i]
-	feeRefund := big.NewInt(0)
-	if r.FeeRefund != nil {
-		feeRefund = feeRefund.Set(r.FeeRefund)
-	}
-	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, feeRefund, r.Bloom, r.Logs}
+	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, safeFeeRefund(r.FeeRefund), r.Bloom, r.Logs}
 	switch r.Type {
 	case LegacyTxType:
 		rlp.Encode(w, data)

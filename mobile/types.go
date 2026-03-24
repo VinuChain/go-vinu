@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -375,4 +376,9 @@ func (r *Receipt) GetLogs() *Logs               { return &Logs{r.receipt.Logs} }
 func (r *Receipt) GetTxHash() *Hash             { return &Hash{r.receipt.TxHash} }
 func (r *Receipt) GetContractAddress() *Address { return &Address{r.receipt.ContractAddress} }
 func (r *Receipt) GetGasUsed() int64            { return int64(r.receipt.GasUsed) }
-func (r *Receipt) GetFeeRefund() *BigInt        { return &BigInt{r.receipt.FeeRefund} }
+func (r *Receipt) GetFeeRefund() *BigInt {
+	if r.receipt.FeeRefund == nil {
+		return &BigInt{new(big.Int)}
+	}
+	return &BigInt{r.receipt.FeeRefund}
+}

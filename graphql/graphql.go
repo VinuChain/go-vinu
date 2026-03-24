@@ -401,6 +401,9 @@ func (t *Transaction) FeeRefund(ctx context.Context) (hexutil.Big, error) {
 		return hexutil.Big{}, err
 	}
 
+	if receipt.FeeRefund == nil {
+		return hexutil.Big{}, nil
+	}
 	return hexutil.Big(*receipt.FeeRefund), nil
 }
 
