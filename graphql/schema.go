@@ -125,6 +125,9 @@ const schema string = `
         # coerced into the EIP-1559 format by setting both maxFeePerGas and
         # maxPriorityFeePerGas as the transaction's gas price.
         effectiveGasPrice: BigInt
+        # FeeRefund is the amount of fee refunded to the sender under VinuChain's
+        # Podgorica payback rules. Null for transactions before Podgorica activation.
+        feeRefund: BigInt
         # CreatedContract is the account that was created by a contract creation
         # transaction. If the transaction was not a contract creation transaction,
         # or it has not yet been mined, this field will be null.
