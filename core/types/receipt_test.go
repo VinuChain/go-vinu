@@ -18,6 +18,7 @@ package types
 
 import (
 	"bytes"
+	"encoding/json"
 	"math"
 	"math/big"
 	"reflect"
@@ -353,4 +354,114 @@ func clearComputedFieldsOnLog(t *testing.T, log *Log) {
 	log.TxHash = common.Hash{}
 	log.TxIndex = math.MaxUint32
 	log.Index = math.MaxUint32
+}
+
+func TestFeeRefundRoundTrip(t *testing.T) {
+	logs := []*Log{
+		{
+			Address: common.BytesToAddress([]byte{0x11}),
+			Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},
+			Data:    []byte{0x01, 0x00, 0xff},
+		},
+		{
+			Address: common.BytesToAddress([]byte{0x01, 0x11}),
+			Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},
+			Data:    []byte{0x01, 0x00, 0xff},
+		},
+	}
+
+	receipt := &Receipt{
+		Status:            ReceiptStatusSuccessful,
+		CumulativeGasUsed: 100,
+		Bloom:             BytesToBloom([]byte{0x01}),
+		Logs:              logs,
+		TxHash:            common.HexToHash("0xabc123"),
+		GasUsed:           50,
+		FeeRefund:         big.NewInt(123456789),
+	}
+
+	t.Run("JSON", func(t *testing.T) {
+		data, err := json.Marshal(receipt)
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		var dec Receipt
+		if err := json.Unmarshal(data, &dec); err != nil {
+			t.Fatalf("Unmarshal: %v", err)
+		}
+		if dec.FeeRefund == nil {
+			t.Fatal("FeeRefund is nil after JSON round-trip")
+		}
+		if dec.FeeRefund.Cmp(receipt.FeeRefund) != 0 {
+			t.Fatalf("FeeRefund mismatch: got %s, want %s", dec.FeeRefund, receipt.FeeRefund)
+		}
+	})
+
+	t.Run("StorageRLP", func(t *testing.T) {
+		stored := ReceiptForStorage(*receipt)
+		var buf bytes.Buffer
+		if err := rlp.Encode(&buf, &stored); err != nil {
+			t.Fatalf("Encode: %v", err)
+		}
+		var dec ReceiptForStorage
+		if err := rlp.DecodeBytes(buf.Bytes(), &dec); err != nil {
+			t.Fatalf("Decode: %v", err)
+		}
+		if dec.FeeRefund == nil {
+			t.Fatal("FeeRefund is nil after storage RLP round-trip")
+		}
+		if dec.FeeRefund.Cmp(receipt.FeeRefund) != 0 {
+			t.Fatalf("FeeRefund mismatch: got %s, want %s", dec.FeeRefund, receipt.FeeRefund)
+		}
+	})
+
+	t.Run("JSON_nil_FeeRefund", func(t *testing.T) {
+		r := &Receipt{
+			Status:            ReceiptStatusFailed,
+			CumulativeGasUsed: 50,
+			Bloom:             BytesToBloom([]byte{0x02}),
+			Logs:              []*Log{},
+			TxHash:            common.HexToHash("0xdef456"),
+			GasUsed:           25,
+			FeeRefund:         nil,
+		}
+		data, err := json.Marshal(r)
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		var dec Receipt
+		if err := json.Unmarshal(data, &dec); err != nil {
+			t.Fatalf("Unmarshal: %v", err)
+		}
+		if dec.FeeRefund != nil {
+			t.Fatalf("expected nil FeeRefund, got %s", dec.FeeRefund)
+		}
+	})
+
+	t.Run("StorageRLP_nil_FeeRefund", func(t *testing.T) {
+		r := &Receipt{
+			Status:            ReceiptStatusFailed,
+			CumulativeGasUsed: 50,
+			Bloom:             BytesToBloom([]byte{0x02}),
+			Logs:              []*Log{},
+			TxHash:            common.HexToHash("0xdef456"),
+			GasUsed:           25,
+			FeeRefund:         nil,
+		}
+		stored := ReceiptForStorage(*r)
+		var buf bytes.Buffer
+		if err := rlp.Encode(&buf, &stored); err != nil {
+			t.Fatalf("Encode: %v", err)
+		}
+		var dec ReceiptForStorage
+		if err := rlp.DecodeBytes(buf.Bytes(), &dec); err != nil {
+			t.Fatalf("Decode: %v", err)
+		}
+		if dec.FeeRefund == nil {
+			t.Fatal("FeeRefund is nil after storage RLP round-trip (expected zero)")
+		}
+		if dec.FeeRefund.Sign() != 0 {
+			t.Fatalf("expected zero FeeRefund, got %s", dec.FeeRefund)
+		}
+	})
 }
