@@ -1661,6 +1661,9 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 	if receipt.ContractAddress != (common.Address{}) {
 		fields["contractAddress"] = receipt.ContractAddress
 	}
+	if receipt.FeeRefund != nil {
+		fields["feeRefund"] = (*hexutil.Big)(receipt.FeeRefund)
+	}
 	return fields, nil
 }
 
