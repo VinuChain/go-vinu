@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
+	"github.com/dop251/goja/parser"
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -304,7 +305,11 @@ func (re *JSRE) loadScript(call Call) (goja.Value, error) {
 }
 
 func compileAndRun(vm *goja.Runtime, filename string, src string) (goja.Value, error) {
-	script, err := goja.Compile(filename, src, false)
+	prg, err := goja.Parse(filename, src, parser.WithDisableSourceMaps)
+	if err != nil {
+		return goja.Null(), err
+	}
+	script, err := goja.CompileAST(prg, false)
 	if err != nil {
 		return goja.Null(), err
 	}
