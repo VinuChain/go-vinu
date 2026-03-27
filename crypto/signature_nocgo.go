@@ -25,7 +25,8 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/btcsuite/btcd/btcec"
+	"github.com/btcsuite/btcd/btcec/v2"
+	btcecdsa "github.com/btcsuite/btcd/btcec/v2/ecdsa"
 )
 
 // Ecrecover returns the uncompressed public key that created the given signature.
@@ -45,7 +46,7 @@ func SigToPub(hash, sig []byte) (*ecdsa.PublicKey, error) {
 	btcsig[0] = sig[64] + 27
 	copy(btcsig[1:], sig)
 
-	pub, _, err := btcec.RecoverCompact(btcec.S256(), btcsig, hash)
+	pub, _, err := btcecdsa.RecoverCompact(btcsig, hash)
 	return (*ecdsa.PublicKey)(pub), err
 }
 
@@ -64,7 +65,7 @@ func Sign(hash []byte, prv *ecdsa.PrivateKey) ([]byte, error) {
 	if prv.Curve != btcec.S256() {
 		return nil, fmt.Errorf("private key curve is not secp256k1")
 	}
-	sig, err := btcec.SignCompact(btcec.S256(), (*btcec.PrivateKey)(prv), hash, false)
+	sig, err := btcecdsa.SignCompact((*btcec.PrivateKey)(prv), hash, false)
 	if err != nil {
 		return nil, err
 	}
@@ -82,13 +83,20 @@ func VerifySignature(pubkey, hash, signature []byte) bool {
 	if len(signature) != 64 {
 		return false
 	}
-	sig := &btcec.Signature{R: new(big.Int).SetBytes(signature[:32]), S: new(big.Int).SetBytes(signature[32:])}
-	key, err := btcec.ParsePubKey(pubkey, btcec.S256())
+	var r, s btcec.ModNScalar
+	if r.SetByteSlice(signature[:32]) {
+		return false // overflow
+	}
+	if s.SetByteSlice(signature[32:]) {
+		return false // overflow
+	}
+	sig := btcecdsa.NewSignature(&r, &s)
+	key, err := btcec.ParsePubKey(pubkey)
 	if err != nil {
 		return false
 	}
 	// Reject malleable signatures. libsecp256k1 does this check but btcec doesn't.
-	if sig.S.Cmp(secp256k1halfN) > 0 {
+	if new(big.Int).SetBytes(signature[32:]).Cmp(secp256k1halfN) > 0 {
 		return false
 	}
 	return sig.Verify(hash, key)
@@ -99,7 +107,7 @@ func DecompressPubkey(pubkey []byte) (*ecdsa.PublicKey, error) {
 	if len(pubkey) != 33 {
 		return nil, errors.New("invalid compressed public key length")
 	}
-	key, err := btcec.ParsePubKey(pubkey, btcec.S256())
+	key, err := btcec.ParsePubKey(pubkey)
 	if err != nil {
 		return nil, err
 	}
