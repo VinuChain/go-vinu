@@ -380,5 +380,5 @@ func (r *Receipt) GetFeeRefund() *BigInt {
 	if r.receipt.FeeRefund == nil {
 		return &BigInt{new(big.Int)}
 	}
-	return &BigInt{r.receipt.FeeRefund}
+	return &BigInt{new(big.Int).Set(r.receipt.FeeRefund)}
 }

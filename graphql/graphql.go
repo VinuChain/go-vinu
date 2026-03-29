@@ -404,7 +404,7 @@ func (t *Transaction) FeeRefund(ctx context.Context) (hexutil.Big, error) {
 	if receipt.FeeRefund == nil {
 		return hexutil.Big{}, nil
 	}
-	return hexutil.Big(*receipt.FeeRefund), nil
+	return hexutil.Big(*new(big.Int).Set(receipt.FeeRefund)), nil
 }
 
 func (t *Transaction) CreatedContract(ctx context.Context, args BlockNumberArgs) (*Account, error) {

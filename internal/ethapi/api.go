@@ -1662,7 +1662,7 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 		fields["contractAddress"] = receipt.ContractAddress
 	}
 	if receipt.FeeRefund != nil {
-		fields["feeRefund"] = (*hexutil.Big)(receipt.FeeRefund)
+		fields["feeRefund"] = (*hexutil.Big)(new(big.Int).Set(receipt.FeeRefund))
 	}
 	return fields, nil
 }

@@ -36,6 +36,8 @@ var (
 	ErrNotificationsUnsupported = errors.New("notifications not supported")
 	// ErrNotificationNotFound is returned when the notification for the given id is not found
 	ErrSubscriptionNotFound = errors.New("subscription not found")
+	// ErrSubscriptionLimitReached is returned when a connection exceeds its subscription quota
+	ErrSubscriptionLimitReached = errors.New("per-connection subscription limit reached")
 )
 
 var globalGen = randomIDGenerator()

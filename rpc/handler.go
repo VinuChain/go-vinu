@@ -202,12 +202,22 @@ func (h *handler) cancelAllRequests(err error, inflightReq *requestOp) {
 	}
 }
 
+// maxSubscriptionsPerConnection limits how many active subscriptions a single
+// WebSocket/IPC connection can hold. This prevents one client from exhausting
+// the global subscription capacity.
+const maxSubscriptionsPerConnection = 200
+
 func (h *handler) addSubscriptions(nn []*Notifier) {
 	h.subLock.Lock()
 	defer h.subLock.Unlock()
 
 	for _, n := range nn {
 		if sub := n.takeSubscription(); sub != nil {
+			if len(h.serverSubs) >= maxSubscriptionsPerConnection {
+				sub.err <- ErrSubscriptionLimitReached
+				h.log.Warn("Per-connection subscription limit reached", "limit", maxSubscriptionsPerConnection)
+				continue
+			}
 			h.serverSubs[sub.ID] = sub
 		}
 	}
@@ -371,6 +381,15 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage) *jsonrpcMessage 
 func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage) *jsonrpcMessage {
 	if !h.allowSubscribe {
 		return msg.errorResponse(ErrNotificationsUnsupported)
+	}
+
+	// Early per-connection limit check to avoid executing subscription
+	// callbacks for subscriptions that will be rejected in addSubscriptions.
+	h.subLock.Lock()
+	overLimit := len(h.serverSubs)+len(cp.notifiers) >= maxSubscriptionsPerConnection
+	h.subLock.Unlock()
+	if overLimit {
+		return msg.errorResponse(ErrSubscriptionLimitReached)
 	}
 
 	// Subscription method name is first argument.
