@@ -110,7 +110,10 @@ func (r *Receipt) UnmarshalJSON(input []byte) error {
 		r.TransactionIndex = uint(*dec.TransactionIndex)
 	}
 	if dec.FeeRefund != nil {
-		r.FeeRefund = (*big.Int)(dec.FeeRefund)
+		r.FeeRefund = new(big.Int).Set((*big.Int)(dec.FeeRefund))
+		if r.FeeRefund.Sign() < 0 {
+			return errors.New("field feeRefund cannot be negative")
+		}
 	}
 	return nil
 }

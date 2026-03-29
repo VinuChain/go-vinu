@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -146,6 +147,11 @@ func NewReceipt(root []byte, failed bool, cumulativeGasUsed uint64) *Receipt {
 	return r
 }
 
+// FeeRefundActive controls whether non-zero FeeRefund values are included in
+// receipt encoding. Set to true by the VinuChain node after Podgorica activation.
+// Pre-Podgorica blocks always encode FeeRefund as zero for deterministic hashing.
+var FeeRefundActive atomic.Bool
+
 // safeFeeRefund returns a copy of the FeeRefund value, defaulting to zero if nil.
 func safeFeeRefund(fr *big.Int) *big.Int {
 	if fr != nil {
@@ -154,10 +160,20 @@ func safeFeeRefund(fr *big.Int) *big.Int {
 	return new(big.Int)
 }
 
+// feeRefundForEncoding returns the FeeRefund value for consensus encoding.
+// Returns zero when FeeRefundActive is false (pre-Podgorica) to ensure
+// deterministic receipt hashing across all nodes.
+func feeRefundForEncoding(fr *big.Int) *big.Int {
+	if !FeeRefundActive.Load() {
+		return new(big.Int)
+	}
+	return safeFeeRefund(fr)
+}
+
 // EncodeRLP implements rlp.Encoder, and flattens the consensus fields of a receipt
 // into an RLP stream. If no post state is present, byzantium fork is assumed.
 func (r *Receipt) EncodeRLP(w io.Writer) error {
-	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, safeFeeRefund(r.FeeRefund), r.Bloom, r.Logs}
+	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, feeRefundForEncoding(r.FeeRefund), r.Bloom, r.Logs}
 	if r.Type == LegacyTxType {
 		return rlp.Encode(w, data)
 	}
@@ -385,7 +401,7 @@ func (rs Receipts) Len() int { return len(rs) }
 // EncodeIndex encodes the i'th receipt to w.
 func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 	r := rs[i]
-	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, safeFeeRefund(r.FeeRefund), r.Bloom, r.Logs}
+	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, feeRefundForEncoding(r.FeeRefund), r.Bloom, r.Logs}
 	switch r.Type {
 	case LegacyTxType:
 		rlp.Encode(w, data)

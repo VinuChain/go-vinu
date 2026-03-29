@@ -771,18 +771,17 @@ func (jst *Tracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Ad
 	if !jst.traceCallFrames {
 		return
 	}
+	// Increment unconditionally before error guards. CaptureExit (paired via
+	// EVM defer) also decrements unconditionally after the traceCallFrames guard.
+	// This keeps the counter balanced in all error paths.
+	jst.callFrameDepth++
 	if jst.err != nil {
 		return
 	}
-	// If tracing was interrupted, set the error and stop
 	if atomic.LoadUint32(&jst.interrupt) > 0 {
 		jst.err = jst.reason
 		return
 	}
-	// Guard against deep nesting that can crash the Duktape JS engine.
-	// The EVM allows up to 1024 (params.CallCreateDepth); we cap at half
-	// to stay within Duktape's C stack limits.
-	jst.callFrameDepth++
 	if jst.callFrameDepth > maxTracerCallDepth {
 		jst.err = fmt.Errorf("call frame depth exceeded maximum (%d)", maxTracerCallDepth)
 		return
