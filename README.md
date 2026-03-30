@@ -5,7 +5,7 @@ VinuChain's fork of [go-ethereum](https://github.com/ethereum/go-ethereum), prov
 The Go module path remains `github.com/ethereum/go-ethereum` for compatibility with the upstream import graph. VinuChain's `go.mod` consumes this fork via a `replace` directive:
 
 ```
-replace github.com/ethereum/go-ethereum => github.com/VinuChain/go-vinu v1.20.6-quota
+replace github.com/ethereum/go-ethereum => github.com/VinuChain/go-vinu v1.20.8-quota
 ```
 
 ## Why the fork?
@@ -27,10 +27,11 @@ VinuChain's fee refund mechanism returns a portion of transaction fees to eligib
 - **FeeRefund pointer safety** — fixed pointer aliasing that could leak values across receipts in the same block
 - **Per-connection subscription limits** — prevent resource exhaustion from unbounded WebSocket/IPC subscriptions
 - **JS tracer hardening** — fixed call depth tracking to prevent crashes, disabled source map loading in the goja JS engine
+- **Removed docker/docker dependency** — replaced `docker/pkg/reexec` with internal implementation, eliminating CVE alerts (GHSA-x744-4wpc-v9h2, GHSA-pxq6-2prw-chj9)
 
 ### Modernization
 
-- Go directive bumped from 1.15 to 1.24.1
+- Go directive bumped from 1.15 to 1.25.8
 - Removed deprecated `fjl/memsize` dependency
 - Updated `golang.org/x/*` packages for compatibility
 - Console banner rebranded from Vinu to VinuChain
@@ -45,7 +46,7 @@ This fork preserves the full go-ethereum API surface. All standard Ethereum JSON
 make geth
 ```
 
-Requires Go 1.22+ and a C compiler. The build output is `build/bin/geth`, though VinuChain nodes use this as a library — not as a standalone binary.
+Requires Go 1.25+ and a C compiler. The build output is `build/bin/geth`, though VinuChain nodes use this as a library — not as a standalone binary.
 
 ## Testing
 
@@ -59,7 +60,9 @@ Tags follow the pattern `v1.20.X-quota` to indicate the VinuChain quota/payback 
 
 | Tag | Description |
 |-----|-------------|
-| `v1.20.6-quota` | Latest: audit hardening, btcec v2, Go 1.24.1 |
+| `v1.20.8-quota` | Remove docker/docker CVE dependency, Go 1.25.8, full dep alignment |
+| `v1.20.7-quota` | Dependency alignment: Go 1.25.8, golang.org/x/*, protobuf |
+| `v1.20.6-quota` | Audit hardening, btcec v2, Go 1.24.1 |
 | `v1.20.5-quota` | FeeRefund pointer fixes, subscription limits |
 | `v1.20.4-quota` | btcec v2 migration |
 | `v1.20.3-quota` | Go 1.24.1 upgrade |
