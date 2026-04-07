@@ -59,10 +59,14 @@ func NewServer() *Server {
 	return server
 }
 
-// SetConcurrencyLimit sets the maximum number of concurrent HTTP/WS requests
+// SetConcurrencyLimit sets the maximum number of concurrent HTTP RPC requests
 // the server will handle. Requests beyond this limit receive HTTP 503. A value
 // of 0 (the default) means unlimited. Must be called before the server starts
 // accepting connections.
+//
+// WebSocket and IPC connections are not subject to this limit. WebSocket
+// connections are long-lived and already have per-connection subscription
+// limits. IPC is a trusted local transport.
 func (s *Server) SetConcurrencyLimit(n int) {
 	if n > 0 {
 		s.concurrencySem = make(chan struct{}, n)

@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/net/websocket"
 )
 
 func TestServeHTTP_ConcurrencyLimit_Rejects(t *testing.T) {
@@ -80,6 +82,42 @@ func TestServeHTTP_ConcurrencyLimit_Zero_Unlimited(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// TestWebSocket_DoesNotConsumeHTTPConcurrency verifies that WebSocket
+// connections do not consume HTTP concurrency slots. An idle WS connection
+// must not cause HTTP requests to receive 503.
+func TestWebSocket_DoesNotConsumeHTTPConcurrency(t *testing.T) {
+	server := newTestServer()
+	defer server.Stop()
+	server.SetConcurrencyLimit(1)
+
+	// Mux serves both HTTP RPC and WS on the same port.
+	mux := http.NewServeMux()
+	mux.Handle("/ws", server.WebsocketHandler([]string{"*"}))
+	mux.Handle("/", server)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// Open a WebSocket connection (holds for duration of test).
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
+	wsConn, err := websocket.Dial(wsURL, "", ts.URL)
+	if err != nil {
+		t.Fatalf("WebSocket dial failed: %v", err)
+	}
+	defer wsConn.Close()
+
+	// HTTP request should still succeed (WS doesn't consume the slot).
+	body := `{"jsonrpc":"2.0","id":1,"method":"rpc_modules"}`
+	req, _ := http.NewRequest(http.MethodPost, ts.URL, strings.NewReader(body))
+	req.Header.Set("Content-Type", contentType)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d — WS connection blocked HTTP", resp.StatusCode)
+	}
 }
 
 func TestServeHTTP_ConcurrencyLimit_AllowsAfterRelease(t *testing.T) {

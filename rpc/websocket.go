@@ -53,19 +53,17 @@ func (s *Server) WebsocketHandler(allowedOrigins []string) http.Handler {
 		WriteBufferPool: wsBufferPool,
 		CheckOrigin:     wsHandshakeValidator(allowedOrigins),
 	}
+	// WebSocket connections are long-lived (hours/days) and already have
+	// per-connection subscription limits. The HTTP concurrency semaphore
+	// protects against short-lived request flooding and must not be held
+	// for the lifetime of a WebSocket connection.
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.tryAcquireConcurrency() {
-			http.Error(w, "too many concurrent connections", http.StatusServiceUnavailable)
-			return
-		}
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			s.releaseConcurrency()
 			log.Debug("WebSocket upgrade failed", "err", err)
 			return
 		}
 		codec := newWebsocketCodec(conn)
-		defer s.releaseConcurrency()
 		s.ServeCodec(codec, 0)
 	})
 }

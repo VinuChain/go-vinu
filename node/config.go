@@ -139,8 +139,9 @@ type Config struct {
 	// interface.
 	HTTPTimeouts rpc.HTTPTimeouts
 
-	// MaxConcurrentRPC limits the number of in-flight HTTP/WS RPC requests.
+	// MaxConcurrentRPC limits the number of in-flight HTTP RPC requests.
 	// Requests beyond this limit receive HTTP 503. Zero means unlimited.
+	// WebSocket and IPC connections are not subject to this limit.
 	MaxConcurrentRPC int
 
 	// HTTPPathPrefix specifies a path prefix on which http-rpc is to be served.

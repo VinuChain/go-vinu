@@ -45,10 +45,9 @@ type httpConfig struct {
 
 // wsConfig is the JSON-RPC/Websocket configuration
 type wsConfig struct {
-	Origins          []string
-	Modules          []string
-	prefix           string // path prefix on which to mount ws handler
-	MaxConcurrentRPC int
+	Origins []string
+	Modules []string
+	prefix  string // path prefix on which to mount ws handler
 }
 
 type rpcHandler struct {
@@ -313,9 +312,9 @@ func (h *httpServer) enableWS(apis []rpc.API, config wsConfig) error {
 		return fmt.Errorf("JSON-RPC over WebSocket is already enabled")
 	}
 
-	// Create RPC server and handler.
+	// Create RPC server and handler. WebSocket connections are long-lived
+	// and not subject to the HTTP concurrency limit.
 	srv := rpc.NewServer()
-	srv.SetConcurrencyLimit(config.MaxConcurrentRPC)
 	if err := RegisterApis(apis, config.Modules, srv, false); err != nil {
 		return err
 	}
