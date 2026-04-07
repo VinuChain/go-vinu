@@ -42,10 +42,11 @@ const (
 
 // Server is an RPC server.
 type Server struct {
-	services serviceRegistry
-	idgen    func() ID
-	run      int32
-	codecs   mapset.Set
+	services       serviceRegistry
+	idgen          func() ID
+	run            int32
+	codecs         mapset.Set
+	concurrencySem chan struct{} // nil = unlimited
 }
 
 // NewServer creates a new server instance with no registered handlers.
@@ -56,6 +57,37 @@ func NewServer() *Server {
 	rpcService := &RPCService{server}
 	server.RegisterName(MetadataApi, rpcService)
 	return server
+}
+
+// SetConcurrencyLimit sets the maximum number of concurrent HTTP/WS requests
+// the server will handle. Requests beyond this limit receive HTTP 503. A value
+// of 0 (the default) means unlimited. Must be called before the server starts
+// accepting connections.
+func (s *Server) SetConcurrencyLimit(n int) {
+	if n > 0 {
+		s.concurrencySem = make(chan struct{}, n)
+	} else {
+		s.concurrencySem = nil
+	}
+}
+
+func (s *Server) tryAcquireConcurrency() bool {
+	if s.concurrencySem == nil {
+		return true
+	}
+	select {
+	case s.concurrencySem <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Server) releaseConcurrency() {
+	if s.concurrencySem == nil {
+		return
+	}
+	<-s.concurrencySem
 }
 
 // RegisterName creates a service for the given receiver type under the given name. When no
@@ -123,6 +155,9 @@ func (s *Server) Stop() {
 		return
 	}
 	log.Debug("RPC server shutting down")
+	s.services.mu.Lock()
+	s.services.stopping = true
+	s.services.mu.Unlock()
 	s.codecs.Each(func(c interface{}) bool {
 		c.(ServerCodec).close()
 		return true

@@ -236,6 +236,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), code)
 		return
 	}
+	if !s.tryAcquireConcurrency() {
+		http.Error(w, "too many concurrent requests", http.StatusServiceUnavailable)
+		return
+	}
+	defer s.releaseConcurrency()
+
 	// All checks passed, create a codec that reads directly from the request body
 	// until EOF, writes the response to w, and orders the server to process a
 	// single request.

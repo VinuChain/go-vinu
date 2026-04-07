@@ -237,8 +237,15 @@ func (h *handler) cancelServerSubscriptions(err error) {
 
 // startCallProc runs fn in a new goroutine and starts tracking it in the h.calls wait group.
 func (h *handler) startCallProc(fn func(*callProc)) {
+	h.reg.mu.Lock()
+	if h.reg.stopping {
+		h.reg.mu.Unlock()
+		return
+	}
 	h.callWG.Add(1)
 	h.reg.callWG.Add(1)
+	h.reg.mu.Unlock()
+
 	go func() {
 		defer h.callWG.Done()
 		defer h.reg.callWG.Done()

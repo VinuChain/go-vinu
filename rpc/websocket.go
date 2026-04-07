@@ -54,12 +54,18 @@ func (s *Server) WebsocketHandler(allowedOrigins []string) http.Handler {
 		CheckOrigin:     wsHandshakeValidator(allowedOrigins),
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.tryAcquireConcurrency() {
+			http.Error(w, "too many concurrent connections", http.StatusServiceUnavailable)
+			return
+		}
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
+			s.releaseConcurrency()
 			log.Debug("WebSocket upgrade failed", "err", err)
 			return
 		}
 		codec := newWebsocketCodec(conn)
+		defer s.releaseConcurrency()
 		s.ServeCodec(codec, 0)
 	})
 }

@@ -40,13 +40,15 @@ type httpConfig struct {
 	CorsAllowedOrigins []string
 	Vhosts             []string
 	prefix             string // path prefix on which to mount http handler
+	MaxConcurrentRPC   int
 }
 
 // wsConfig is the JSON-RPC/Websocket configuration
 type wsConfig struct {
-	Origins []string
-	Modules []string
-	prefix  string // path prefix on which to mount ws handler
+	Origins          []string
+	Modules          []string
+	prefix           string // path prefix on which to mount ws handler
+	MaxConcurrentRPC int
 }
 
 type rpcHandler struct {
@@ -280,6 +282,7 @@ func (h *httpServer) enableRPC(apis []rpc.API, config httpConfig) error {
 
 	// Create RPC server and handler.
 	srv := rpc.NewServer()
+	srv.SetConcurrencyLimit(config.MaxConcurrentRPC)
 	if err := RegisterApis(apis, config.Modules, srv, false); err != nil {
 		return err
 	}
@@ -312,6 +315,7 @@ func (h *httpServer) enableWS(apis []rpc.API, config wsConfig) error {
 
 	// Create RPC server and handler.
 	srv := rpc.NewServer()
+	srv.SetConcurrencyLimit(config.MaxConcurrentRPC)
 	if err := RegisterApis(apis, config.Modules, srv, false); err != nil {
 		return err
 	}
