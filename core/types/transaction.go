@@ -295,16 +295,10 @@ func (tx *Transaction) To() *common.Address {
 
 // From returns the sender address of the transaction.
 func (tx *Transaction) From() common.Address {
-	if sig := tx.from.Load(); sig != nil {
-		switch sig := sig.(type) {
-		case sigCache:
-			return sig.from
-		case common.Address:
-			return sig
-		}
+	if sc, ok := tx.from.Load().(sigCache); ok {
+		return sc.from
 	}
-	signer := HomesteadSigner{}
-	from, _ := Sender(signer, tx)
+	from, _ := Sender(HomesteadSigner{}, tx)
 	return from
 }
 
