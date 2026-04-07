@@ -293,13 +293,13 @@ func (tx *Transaction) To() *common.Address {
 	return &cpy
 }
 
-// From returns the sender address of the transaction.
+// From returns the cached sender address of the transaction.
+// Returns zero address if Sender() has not been called yet.
 func (tx *Transaction) From() common.Address {
 	if sc, ok := tx.from.Load().(sigCache); ok {
 		return sc.from
 	}
-	from, _ := Sender(HomesteadSigner{}, tx)
-	return from
+	return common.Address{}
 }
 
 // Cost returns gas * gasPrice + value.
