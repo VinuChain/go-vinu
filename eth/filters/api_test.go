@@ -183,3 +183,78 @@ func TestUnmarshalJSONNewFilterArgs(t *testing.T) {
 		t.Fatalf("expected 0 topics, got %d topics", len(test7.Topics[2]))
 	}
 }
+
+// TestUnmarshalJSON_RejectsExcessiveTopics verifies that FilterCriteria
+// UnmarshalJSON rejects filter requests whose topic criteria exceed the
+// consensus limit (4 top-level, matching LOG0..LOG4) or the per-position
+// subtopic limit (1000). Without these guards, an RPC caller can submit
+// a huge nested topic array that forces the server to allocate and decode
+// millions of 32-byte hashes from a single small HTTP request — a cheap
+// memory/CPU amplification against a public eth_getLogs / eth_newFilter
+// endpoint.
+func TestUnmarshalJSON_RejectsExcessiveTopics(t *testing.T) {
+	validTopic := common.HexToHash("3ac225168df54212a25c1c01fd35bebfea408fdac2e31ddd6f80a4bbf9a5f1ca").Hex()
+
+	// 5 top-level topic criteria — LOG opcodes allow at most 4.
+	t.Run("too many top-level topics", func(t *testing.T) {
+		vector := fmt.Sprintf(
+			`{"topics":[["%s"],["%s"],["%s"],["%s"],["%s"]]}`,
+			validTopic, validTopic, validTopic, validTopic, validTopic,
+		)
+		var fc FilterCriteria
+		if err := json.Unmarshal([]byte(vector), &fc); err == nil {
+			t.Fatal("expected error for 5 top-level topics, got nil")
+		}
+	})
+
+	// 1001 subtopics in a single position — exceeds the per-position limit.
+	t.Run("too many subtopics", func(t *testing.T) {
+		topics := make([]string, 1001)
+		for i := range topics {
+			topics[i] = fmt.Sprintf("%q", validTopic)
+		}
+		joined := ""
+		for i, q := range topics {
+			if i > 0 {
+				joined += ","
+			}
+			joined += q
+		}
+		vector := fmt.Sprintf(`{"topics":[[%s]]}`, joined)
+		var fc FilterCriteria
+		if err := json.Unmarshal([]byte(vector), &fc); err == nil {
+			t.Fatal("expected error for 1001 subtopics, got nil")
+		}
+	})
+
+	// Happy path: exactly the maxima must parse successfully.
+	t.Run("at-limit top-level topics accepted", func(t *testing.T) {
+		vector := fmt.Sprintf(
+			`{"topics":[["%s"],["%s"],["%s"],["%s"]]}`,
+			validTopic, validTopic, validTopic, validTopic,
+		)
+		var fc FilterCriteria
+		if err := json.Unmarshal([]byte(vector), &fc); err != nil {
+			t.Fatalf("4 top-level topics must parse, got err=%v", err)
+		}
+	})
+
+	t.Run("at-limit subtopics accepted", func(t *testing.T) {
+		topics := make([]string, 1000)
+		for i := range topics {
+			topics[i] = fmt.Sprintf("%q", validTopic)
+		}
+		joined := ""
+		for i, q := range topics {
+			if i > 0 {
+				joined += ","
+			}
+			joined += q
+		}
+		vector := fmt.Sprintf(`{"topics":[[%s]]}`, joined)
+		var fc FilterCriteria
+		if err := json.Unmarshal([]byte(vector), &fc); err != nil {
+			t.Fatalf("1000 subtopics must parse, got err=%v", err)
+		}
+	})
+}
