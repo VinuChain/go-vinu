@@ -428,3 +428,72 @@ func decode(s string) []byte {
 	}
 	return bytes
 }
+
+// TestGenerateShared_RejectsOffCurvePubKey verifies that GenerateShared
+// refuses to perform ECDH when the peer's public key coordinates are not
+// on the declared elliptic curve. Without this check, an attacker can
+// supply a crafted point off the curve during the RLPx handshake and
+// mount an invalid-curve / small-subgroup attack against the ECDH step.
+// The fix is to call Curve.IsOnCurve(X, Y) before ScalarMult.
+func TestGenerateShared_RejectsOffCurvePubKey(t *testing.T) {
+	prv, err := GenerateKey(rand.Reader, DefaultCurve, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// (1, 1) is not on secp256k1: y^2 = x^3 + 7 would require 1 = 8 mod p,
+	// which is false. Every valid secp256k1 point satisfies IsOnCurve; this
+	// point is a deliberate counterexample.
+	offCurve := &PublicKey{
+		X:      big.NewInt(1),
+		Y:      big.NewInt(1),
+		Curve:  DefaultCurve,
+		Params: ParamsFromCurve(DefaultCurve),
+	}
+	if offCurve.Curve.IsOnCurve(offCurve.X, offCurve.Y) {
+		t.Fatal("precondition: test point (1,1) must be off-curve")
+	}
+
+	_, err = prv.GenerateShared(offCurve, 16, 16)
+	if err != ErrInvalidPublicKey {
+		t.Fatalf("GenerateShared accepted off-curve pubkey: got err=%v, want ErrInvalidPublicKey", err)
+	}
+}
+
+// TestGenerateShared_RejectsNilCoordinates verifies that GenerateShared
+// rejects a public key with nil X or Y. Without this guard, a nil pointer
+// reaches ScalarMult and the call panics — a lower-severity but still
+// exploitable DoS from an untrusted network peer.
+func TestGenerateShared_RejectsNilCoordinates(t *testing.T) {
+	prv, err := GenerateKey(rand.Reader, DefaultCurve, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		x, y    *big.Int
+	}{
+		{"nil X", nil, big.NewInt(1)},
+		{"nil Y", big.NewInt(1), nil},
+		{"both nil", nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("GenerateShared panicked on %s: %v", tc.name, r)
+				}
+			}()
+			bad := &PublicKey{
+				X:      tc.x,
+				Y:      tc.y,
+				Curve:  DefaultCurve,
+				Params: ParamsFromCurve(DefaultCurve),
+			}
+			_, err := prv.GenerateShared(bad, 16, 16)
+			if err != ErrInvalidPublicKey {
+				t.Fatalf("GenerateShared accepted %s: got err=%v, want ErrInvalidPublicKey", tc.name, err)
+			}
+		})
+	}
+}

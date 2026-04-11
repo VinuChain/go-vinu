@@ -122,6 +122,13 @@ func (prv *PrivateKey) GenerateShared(pub *PublicKey, skLen, macLen int) (sk []b
 	if prv.PublicKey.Curve != pub.Curve {
 		return nil, ErrInvalidCurve
 	}
+	// Reject invalid public keys before ECDH. Without this guard an off-curve
+	// or small-subgroup point supplied by an untrusted RLPx peer would proceed
+	// into ScalarMult and leak structural information through decrypt success
+	// or failure patterns. A nil coordinate would also panic.
+	if pub.X == nil || pub.Y == nil || !pub.Curve.IsOnCurve(pub.X, pub.Y) {
+		return nil, ErrInvalidPublicKey
+	}
 	if skLen+macLen > MaxSharedKeyLength(pub) {
 		return nil, ErrSharedKeyTooBig
 	}
