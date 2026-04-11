@@ -11,6 +11,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"io"
+	"math/big"
 	"testing"
 )
 
@@ -234,5 +235,46 @@ func BenchmarkRecover(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		RecoverPubkey(msg, sig)
+	}
+}
+
+// TestIsOnCurve_RejectsCoordinatesAboveP verifies that BitCurve.IsOnCurve
+// rejects coordinates whose absolute value is at or above the field prime P.
+// Without this guard, an attacker can submit (Gx+P, Gy) — which wraps to the
+// generator point under the modular reduction inside the curve equation check
+// and is incorrectly accepted as valid, enabling downstream equality and
+// signature-verification bypasses.
+func TestIsOnCurve_RejectsCoordinatesAboveP(t *testing.T) {
+	curve := S256()
+	params := curve.Params()
+	Gx := new(big.Int).Set(params.Gx)
+	Gy := new(big.Int).Set(params.Gy)
+	P := new(big.Int).Set(params.P)
+
+	// Sanity: the base generator point must pass unchanged.
+	if !curve.IsOnCurve(Gx, Gy) {
+		t.Fatal("precondition: generator point must be on curve")
+	}
+
+	// (Gx + P) mod P = Gx, so the equation still holds under modular
+	// reduction. The fix must reject this at the coordinate-range step
+	// before the equation check.
+	badX := new(big.Int).Add(Gx, P)
+	if curve.IsOnCurve(badX, Gy) {
+		t.Error("IsOnCurve accepted (Gx+P, Gy): coordinate range not validated")
+	}
+
+	// Mirror test for Y.
+	badY := new(big.Int).Add(Gy, P)
+	if curve.IsOnCurve(Gx, badY) {
+		t.Error("IsOnCurve accepted (Gx, Gy+P): coordinate range not validated")
+	}
+
+	// Exactly P is at the upper boundary and must also be rejected.
+	if curve.IsOnCurve(P, Gy) {
+		t.Error("IsOnCurve accepted (P, Gy): coordinate equal to P not rejected")
+	}
+	if curve.IsOnCurve(Gx, P) {
+		t.Error("IsOnCurve accepted (Gx, P): coordinate equal to P not rejected")
 	}
 }

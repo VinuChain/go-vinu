@@ -92,6 +92,17 @@ func (BitCurve *BitCurve) Params() *elliptic.CurveParams {
 
 // IsOnCurve returns true if the given (x,y) lies on the BitCurve.
 func (BitCurve *BitCurve) IsOnCurve(x, y *big.Int) bool {
+	// Reject coordinates that are not in the canonical field range [0, P).
+	// Without this guard, a malicious caller could submit (x+P, y) — which
+	// wraps to (x, y) under the modular reduction inside the curve equation
+	// below — and have the point falsely accepted as valid. That opens the
+	// door to invalid-point equality checks and small-subgroup attacks on
+	// downstream cryptographic operations.
+	if x == nil || y == nil || x.Sign() < 0 || y.Sign() < 0 ||
+		x.Cmp(BitCurve.P) >= 0 || y.Cmp(BitCurve.P) >= 0 {
+		return false
+	}
+
 	// y² = x³ + b
 	y2 := new(big.Int).Mul(y, y) //y²
 	y2.Mod(y2, BitCurve.P)       //y²%P
