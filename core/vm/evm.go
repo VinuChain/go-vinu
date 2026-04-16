@@ -84,8 +84,11 @@ type BlockContext struct {
 	Time        *big.Int       // Provides information for TIME
 	Difficulty  *big.Int       // Provides information for DIFFICULTY
 	BaseFee     *big.Int       // Provides information for BASEFEE
-	// BaseFeeFloor is the chain-configured minimum base fee (e.g. Rules.Economy.MinGasPrice);
-	// used by consumers to detect congestion. May be nil.
+	// BaseFeeFloor is the chain-configured minimum base fee, populated by VinuChain's
+	// block processor from Rules.Economy.MinGasPrice. No go-vinu EVM code reads this
+	// field — it is threaded through BlockContext as a vehicle for VinuChain's payback
+	// congestion guard (see github.com/Fantom-foundation/go-opera/evmcore/state_transition.go).
+	// May be nil (disables congestion-aware paths on the consumer side).
 	BaseFeeFloor *big.Int
 }
 
