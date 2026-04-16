@@ -84,6 +84,9 @@ type BlockContext struct {
 	Time        *big.Int       // Provides information for TIME
 	Difficulty  *big.Int       // Provides information for DIFFICULTY
 	BaseFee     *big.Int       // Provides information for BASEFEE
+	// BaseFeeFloor is the chain-configured minimum base fee (e.g. Rules.Economy.MinGasPrice);
+	// used by consumers to detect congestion. May be nil.
+	BaseFeeFloor *big.Int
 }
 
 // TxContext provides the EVM with information about a transaction.
