@@ -160,3 +160,14 @@ func TestNodeKeyPersistency(t *testing.T) {
 		t.Fatalf("ephemeral node key persisted to disk")
 	}
 }
+
+// TestDefaultConfigMaxConcurrentRPC verifies that DefaultConfig enforces a
+// non-zero per-connection concurrency limit so that production deployments
+// without explicit operator configuration are not left exposed to resource
+// exhaustion via unlimited concurrent in-flight HTTP RPC requests.
+func TestDefaultConfigMaxConcurrentRPC(t *testing.T) {
+	if DefaultConfig.MaxConcurrentRPC <= 0 {
+		t.Fatalf("DefaultConfig.MaxConcurrentRPC = %d; want > 0 to cap per-connection concurrency",
+			DefaultConfig.MaxConcurrentRPC)
+	}
+}
