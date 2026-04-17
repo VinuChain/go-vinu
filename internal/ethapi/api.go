@@ -846,6 +846,12 @@ type OverrideAccount struct {
 // StateOverride is the collection of overridden accounts.
 type StateOverride map[common.Address]OverrideAccount
 
+// maxStateDiffEntries is the maximum number of storage slot overrides accepted
+// in a single StateDiff map within a StateOverride. Requests exceeding this
+// limit are rejected to prevent unbounded iteration from exhausting RPC node
+// resources.
+const maxStateDiffEntries = 1000
+
 // Apply overrides the fields of specified accounts into the given state.
 func (diff *StateOverride) Apply(state *state.StateDB) error {
 	if diff == nil {
@@ -877,6 +883,10 @@ func (diff *StateOverride) Apply(state *state.StateDB) error {
 		}
 		// Apply state diff into specified accounts.
 		if account.StateDiff != nil {
+			if len(*account.StateDiff) > maxStateDiffEntries {
+				return fmt.Errorf("account %s: state diff too large (%d > %d)",
+					addr.Hex(), len(*account.StateDiff), maxStateDiffEntries)
+			}
 			for key, value := range *account.StateDiff {
 				state.SetState(addr, key, value)
 			}
