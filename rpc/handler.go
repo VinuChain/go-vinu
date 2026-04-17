@@ -112,18 +112,22 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 	// Emit error response for empty batches:
 	if len(msgs) == 0 {
-		h.startCallProc(func(cp *callProc) {
+		if !h.startCallProc(func(cp *callProc) {
 			h.conn.writeJSON(cp.ctx, errorMessage(&invalidRequestError{"empty batch"}))
-		})
+		}) {
+			h.respondShutdown(nil)
+		}
 		return
 	}
 
 	// Reject oversized batches to prevent a single connection from holding a
 	// semaphore slot while processing an unbounded number of requests.
 	if len(msgs) > maxBatchSize {
-		h.startCallProc(func(cp *callProc) {
+		if !h.startCallProc(func(cp *callProc) {
 			h.conn.writeJSON(cp.ctx, errorMessage(&invalidRequestError{"batch too large"}))
-		})
+		}) {
+			h.respondShutdown(nil)
+		}
 		return
 	}
 
@@ -138,7 +142,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 		return
 	}
 	// Process calls on a goroutine because they may block indefinitely:
-	h.startCallProc(func(cp *callProc) {
+	if !h.startCallProc(func(cp *callProc) {
 		answers := make([]*jsonrpcMessage, 0, len(msgs))
 		for _, msg := range calls {
 			if answer := h.handleCallMsg(cp, msg); answer != nil {
@@ -152,7 +156,9 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 		for _, n := range cp.notifiers {
 			n.activate()
 		}
-	})
+	}) {
+		h.respondShutdown(calls)
+	}
 }
 
 // handleMsg handles a single message.
@@ -160,7 +166,7 @@ func (h *handler) handleMsg(msg *jsonrpcMessage) {
 	if ok := h.handleImmediate(msg); ok {
 		return
 	}
-	h.startCallProc(func(cp *callProc) {
+	if !h.startCallProc(func(cp *callProc) {
 		answer := h.handleCallMsg(cp, msg)
 		h.addSubscriptions(cp.notifiers)
 		if answer != nil {
@@ -169,7 +175,9 @@ func (h *handler) handleMsg(msg *jsonrpcMessage) {
 		for _, n := range cp.notifiers {
 			n.activate()
 		}
-	})
+	}) {
+		h.respondShutdown([]*jsonrpcMessage{msg})
+	}
 }
 
 // close cancels all requests except for inflightReq and waits for
@@ -252,11 +260,14 @@ func (h *handler) cancelServerSubscriptions(err error) {
 }
 
 // startCallProc runs fn in a new goroutine and starts tracking it in the h.calls wait group.
-func (h *handler) startCallProc(fn func(*callProc)) {
+// It returns false if the service registry is already stopping, in which case fn
+// is not invoked and callers must emit a shutdown response of their own to avoid
+// silently dropping the client's request.
+func (h *handler) startCallProc(fn func(*callProc)) bool {
 	h.reg.mu.Lock()
 	if h.reg.stopping {
 		h.reg.mu.Unlock()
-		return
+		return false
 	}
 	h.callWG.Add(1)
 	h.reg.callWG.Add(1)
@@ -270,6 +281,34 @@ func (h *handler) startCallProc(fn func(*callProc)) {
 		defer cancel()
 		fn(&callProc{ctx: ctx})
 	}()
+	return true
+}
+
+// serverShuttingDownError is returned instead of silently dropping calls when
+// the handler is being shut down, so clients see a JSON-RPC error rather than
+// an unexplained connection close.
+type serverShuttingDownError struct{}
+
+func (e *serverShuttingDownError) ErrorCode() int { return defaultErrorCode }
+func (e *serverShuttingDownError) Error() string  { return "server is shutting down" }
+
+// respondShutdown writes a shutdown error response for each of the provided
+// request messages directly on the connection. It is used when the service
+// registry is stopping and startCallProc declined to schedule the work.
+func (h *handler) respondShutdown(msgs []*jsonrpcMessage) {
+	if len(msgs) == 0 {
+		h.conn.writeJSON(h.rootCtx, errorMessage(&serverShuttingDownError{}))
+		return
+	}
+	if len(msgs) == 1 {
+		h.conn.writeJSON(h.rootCtx, msgs[0].errorResponse(&serverShuttingDownError{}))
+		return
+	}
+	answers := make([]*jsonrpcMessage, len(msgs))
+	for i, m := range msgs {
+		answers[i] = m.errorResponse(&serverShuttingDownError{})
+	}
+	h.conn.writeJSON(h.rootCtx, answers)
 }
 
 // handleImmediate executes non-call messages. It returns false if the message is a
