@@ -28,6 +28,13 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
+const (
+	// maxBatchSize caps the number of requests accepted in a single JSON-RPC
+	// batch. Without this limit a single connection can occupy one semaphore
+	// slot while processing ~90,000 requests, starving legitimate clients.
+	maxBatchSize = 100
+)
+
 var (
 	executionTimeLimit = 5 * time.Second
 )
@@ -107,6 +114,15 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 	if len(msgs) == 0 {
 		h.startCallProc(func(cp *callProc) {
 			h.conn.writeJSON(cp.ctx, errorMessage(&invalidRequestError{"empty batch"}))
+		})
+		return
+	}
+
+	// Reject oversized batches to prevent a single connection from holding a
+	// semaphore slot while processing an unbounded number of requests.
+	if len(msgs) > maxBatchSize {
+		h.startCallProc(func(cp *callProc) {
+			h.conn.writeJSON(cp.ctx, errorMessage(&invalidRequestError{"batch too large"}))
 		})
 		return
 	}

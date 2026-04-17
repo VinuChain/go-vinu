@@ -17,6 +17,9 @@
 package rpc
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -160,5 +163,54 @@ func TestHTTPErrorResponse(t *testing.T) {
 
 	if errMsg := httpErr.Error(); errMsg != "418 I'm a teapot: error has occurred!\n" {
 		t.Error("unexpected error message", errMsg)
+	}
+}
+
+// TestBatchTooLarge verifies that a batch exceeding maxBatchSize is rejected
+// with a single invalidRequestError rather than processing all messages.
+func TestBatchTooLarge(t *testing.T) {
+	s := newTestServer()
+	defer s.Stop()
+	ts := httptest.NewServer(s)
+	defer ts.Close()
+
+	// Build a batch of maxBatchSize+1 requests.
+	parts := make([]string, maxBatchSize+1)
+	for i := range parts {
+		parts[i] = fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"rpc_modules"}`, i+1)
+	}
+	body := "[" + strings.Join(parts, ",") + "]"
+
+	req, err := http.NewRequest(http.MethodPost, ts.URL, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("failed to build request: %v", err)
+	}
+	req.Header.Set("Content-Type", contentType)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected HTTP status %d", resp.StatusCode)
+	}
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+
+	// Must be a single JSON object (not an array) with an error field.
+	var errResp jsonrpcMessage
+	if err := json.Unmarshal(raw, &errResp); err != nil {
+		t.Fatalf("response is not a single JSON object: %v\nbody: %s", err, raw)
+	}
+	if errResp.Error == nil {
+		t.Fatalf("expected error response, got: %s", raw)
+	}
+	if errResp.Error.Code != -32600 {
+		t.Errorf("expected error code -32600, got %d", errResp.Error.Code)
 	}
 }
