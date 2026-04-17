@@ -357,7 +357,7 @@ func clearComputedFieldsOnLog(t *testing.T, log *Log) {
 }
 
 // TestFeeRefundSizeCap verifies that decoding a receipt whose FeeRefund encodes
-// to more than 32 bytes is rejected (GV-13: cap peer FeeRefund size).
+// to more than 32 bytes is rejected.
 func TestFeeRefundSizeCap(t *testing.T) {
 	// Construct a big.Int whose canonical byte encoding is 33 bytes.
 	// 1 << (8*33) needs 34 bytes but we want exactly 33: use 1 << 256 which is
@@ -391,7 +391,7 @@ func TestFeeRefundSizeCap(t *testing.T) {
 }
 
 // TestFeeRefundZeroedPrePodgorica verifies that when FeeRefundActive is false,
-// a nonzero FeeRefund decoded from P2P data is zeroed out (GV-14).
+// a nonzero FeeRefund decoded from P2P data is zeroed out.
 func TestFeeRefundZeroedPrePodgorica(t *testing.T) {
 	// Encode a receipt with a nonzero 32-byte FeeRefund, bypassing the encoder
 	// gate so we get actual nonzero bytes on the wire.
@@ -408,8 +408,9 @@ func TestFeeRefundZeroedPrePodgorica(t *testing.T) {
 	}
 
 	// Ensure FeeRefundActive is false and restored after the test.
+	prev := FeeRefundActive.Load()
 	FeeRefundActive.Store(false)
-	t.Cleanup(func() { FeeRefundActive.Store(false) })
+	t.Cleanup(func() { FeeRefundActive.Store(prev) })
 
 	var r Receipt
 	if err := rlp.DecodeBytes(raw, &r); err != nil {
