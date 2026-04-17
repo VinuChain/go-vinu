@@ -356,6 +356,70 @@ func clearComputedFieldsOnLog(t *testing.T, log *Log) {
 	log.Index = math.MaxUint32
 }
 
+// TestFeeRefundSizeCap verifies that decoding a receipt whose FeeRefund encodes
+// to more than 32 bytes is rejected (GV-13: cap peer FeeRefund size).
+func TestFeeRefundSizeCap(t *testing.T) {
+	// Construct a big.Int whose canonical byte encoding is 33 bytes.
+	// 1 << (8*33) needs 34 bytes but we want exactly 33: use 1 << 256 which is
+	// 33 bytes (a 1 followed by 32 zero bytes).
+	oversized := new(big.Int).Lsh(big.NewInt(1), 256)
+	if got := len(oversized.Bytes()); got <= 32 {
+		t.Fatalf("precondition failed: expected oversized big.Int > 32 bytes, got %d", got)
+	}
+
+	// Encode a receiptRLP directly (bypassing EncodeRLP, which would zero
+	// FeeRefund when FeeRefundActive is false).
+	raw, err := rlp.EncodeToBytes(&receiptRLP{
+		PostStateOrStatus: receiptStatusSuccessfulRLP,
+		CumulativeGasUsed: 1,
+		FeeRefund:         oversized,
+		Bloom:             Bloom{},
+		Logs:              nil,
+	})
+	if err != nil {
+		t.Fatalf("failed to encode test receipt: %v", err)
+	}
+
+	var r Receipt
+	decErr := rlp.DecodeBytes(raw, &r)
+	if decErr == nil {
+		t.Fatal("expected error for FeeRefund > 32 bytes, got nil")
+	}
+	if decErr.Error() != "receipt FeeRefund exceeds 32 bytes" {
+		t.Fatalf("unexpected error message: %v", decErr)
+	}
+}
+
+// TestFeeRefundZeroedPrePodgorica verifies that when FeeRefundActive is false,
+// a nonzero FeeRefund decoded from P2P data is zeroed out (GV-14).
+func TestFeeRefundZeroedPrePodgorica(t *testing.T) {
+	// Encode a receipt with a nonzero 32-byte FeeRefund, bypassing the encoder
+	// gate so we get actual nonzero bytes on the wire.
+	nonzero := big.NewInt(987654321)
+	raw, err := rlp.EncodeToBytes(&receiptRLP{
+		PostStateOrStatus: receiptStatusSuccessfulRLP,
+		CumulativeGasUsed: 1,
+		FeeRefund:         nonzero,
+		Bloom:             Bloom{},
+		Logs:              nil,
+	})
+	if err != nil {
+		t.Fatalf("failed to encode test receipt: %v", err)
+	}
+
+	// Ensure FeeRefundActive is false and restored after the test.
+	FeeRefundActive.Store(false)
+	t.Cleanup(func() { FeeRefundActive.Store(false) })
+
+	var r Receipt
+	if err := rlp.DecodeBytes(raw, &r); err != nil {
+		t.Fatalf("unexpected decode error: %v", err)
+	}
+	if r.FeeRefund != nil && r.FeeRefund.Sign() != 0 {
+		t.Fatalf("expected FeeRefund to be zeroed pre-Podgorica, got %s", r.FeeRefund)
+	}
+}
+
 func TestFeeRefundRoundTrip(t *testing.T) {
 	logs := []*Log{
 		{

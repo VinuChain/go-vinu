@@ -227,7 +227,15 @@ func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 
 func (r *Receipt) setFromRLP(data receiptRLP) error {
 	r.CumulativeGasUsed, r.Bloom, r.Logs = data.CumulativeGasUsed, data.Bloom, data.Logs
+	// GV-13: reject oversized FeeRefund from peers to prevent large heap allocations.
+	if data.FeeRefund != nil && len(data.FeeRefund.Bytes()) > 32 {
+		return errors.New("receipt FeeRefund exceeds 32 bytes")
+	}
 	r.FeeRefund = safeFeeRefund(data.FeeRefund)
+	// GV-14: discard nonzero FeeRefund received before Podgorica activation.
+	if !FeeRefundActive.Load() {
+		r.FeeRefund = nil
+	}
 	return r.setStatus(data.PostStateOrStatus)
 }
 
