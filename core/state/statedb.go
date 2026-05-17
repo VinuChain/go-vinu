@@ -79,6 +79,7 @@ type StateDB struct {
 	stateObjects        map[common.Address]*stateObject
 	stateObjectsPending map[common.Address]struct{} // State objects finalized but not yet written to the trie
 	stateObjectsDirty   map[common.Address]struct{} // State objects modified in the current execution
+	createdObjects      map[common.Address]struct{} // State objects created in the current transaction
 
 	// DB error.
 	// State objects are used by the consensus core and VM which are
@@ -141,6 +142,7 @@ func NewWithSnapLayers(root common.Hash, db Database, snaps *snapshot.Tree, laye
 		stateObjects:        make(map[common.Address]*stateObject),
 		stateObjectsPending: make(map[common.Address]struct{}),
 		stateObjectsDirty:   make(map[common.Address]struct{}),
+		createdObjects:      make(map[common.Address]struct{}),
 		logs:                make(map[common.Hash][]*types.Log),
 		preimages:           make(map[common.Hash][]byte),
 		journal:             newJournal(),
@@ -378,6 +380,13 @@ func (s *StateDB) HasSuicided(addr common.Address) bool {
 		return stateObject.suicided
 	}
 	return false
+}
+
+// CreatedInThisTransaction reports whether addr was created since the current
+// transaction started.
+func (s *StateDB) CreatedInThisTransaction(addr common.Address) bool {
+	_, ok := s.createdObjects[addr]
+	return ok
 }
 
 /*
@@ -624,6 +633,7 @@ func (s *StateDB) createObject(addr common.Address) (newobj, prev *stateObject) 
 		s.journal.append(resetObjectChange{prev: prev, prevdestruct: prevdestruct})
 	}
 	s.setStateObject(newobj)
+	s.createdObjects[addr] = struct{}{}
 	if prev != nil && !prev.deleted {
 		return newobj, prev
 	}
@@ -686,6 +696,7 @@ func (s *StateDB) Copy() *StateDB {
 		stateObjects:        make(map[common.Address]*stateObject, len(s.journal.dirties)),
 		stateObjectsPending: make(map[common.Address]struct{}, len(s.stateObjectsPending)),
 		stateObjectsDirty:   make(map[common.Address]struct{}, len(s.journal.dirties)),
+		createdObjects:      make(map[common.Address]struct{}, len(s.createdObjects)),
 		refund:              s.refund,
 		logs:                make(map[common.Hash][]*types.Log, len(s.logs)),
 		logSize:             s.logSize,
@@ -724,6 +735,9 @@ func (s *StateDB) Copy() *StateDB {
 			state.stateObjects[addr] = s.stateObjects[addr].deepCopy(state)
 		}
 		state.stateObjectsDirty[addr] = struct{}{}
+	}
+	for addr := range s.createdObjects {
+		state.createdObjects[addr] = struct{}{}
 	}
 	for hash, logs := range s.logs {
 		cpy := make([]*types.Log, len(logs))
@@ -920,6 +934,7 @@ func (s *StateDB) Prepare(thash common.Hash, ti int) {
 	s.txIndex = ti
 	s.accessList = newAccessList()
 	s.transientStorage = newTransientStorage()
+	s.createdObjects = make(map[common.Address]struct{})
 }
 
 func (s *StateDB) clearJournalAndRefund() {

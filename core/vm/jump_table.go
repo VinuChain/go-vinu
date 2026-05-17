@@ -90,6 +90,7 @@ func newCancunInstructionSet() JumpTable {
 	instructionSet := newShanghaiInstructionSet()
 	enable1153(&instructionSet) // EIP-1153: Transient storage opcodes
 	enable5656(&instructionSet) // EIP-5656: MCOPY instruction
+	// EIP-6780 SELFDESTRUCT behavior is gated by chain rules inside opSuicide.
 	return instructionSet
 }
 

@@ -51,6 +51,7 @@ type StateDB interface {
 
 	Suicide(common.Address) bool
 	HasSuicided(common.Address) bool
+	CreatedInThisTransaction(common.Address) bool
 
 	// Exist reports whether the given account exists in state.
 	// Notably this should also return true for suicided accounts.

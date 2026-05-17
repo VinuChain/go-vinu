@@ -946,3 +946,27 @@ func TestStateDBTransientStorage(t *testing.T) {
 		t.Fatalf("prepared transient storage = %x, want zero", got)
 	}
 }
+
+func TestStateDBCreatedInThisTransaction(t *testing.T) {
+	state, _ := New(common.Hash{}, NewDatabase(rawdb.NewMemoryDatabase()), nil)
+	addr := common.HexToAddress("0x1234")
+
+	snapshot := state.Snapshot()
+	state.CreateAccount(addr)
+	if !state.CreatedInThisTransaction(addr) {
+		t.Fatal("created account was not tracked in current transaction")
+	}
+	state.RevertToSnapshot(snapshot)
+	if state.CreatedInThisTransaction(addr) {
+		t.Fatal("reverted account creation stayed marked as current-transaction creation")
+	}
+
+	state.CreateAccount(addr)
+	if !state.CreatedInThisTransaction(addr) {
+		t.Fatal("created account was not tracked before Prepare")
+	}
+	state.Prepare(common.Hash{}, 1)
+	if state.CreatedInThisTransaction(addr) {
+		t.Fatal("Prepare did not reset current-transaction creation markers")
+	}
+}
