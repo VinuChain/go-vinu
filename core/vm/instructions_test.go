@@ -19,6 +19,7 @@ package vm
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"testing"
@@ -648,5 +649,42 @@ func TestCreate2Addreses(t *testing.T) {
 		if !bytes.Equal(expected.Bytes(), address.Bytes()) {
 			t.Errorf("test %d: expected %s, got %s", i, expected.String(), address.String())
 		}
+	}
+}
+
+func TestGasCreateEip3860MetersAndLimitsInitcode(t *testing.T) {
+	pushCreateArgs := func(size uint64) *Stack {
+		stack := newstack()
+		stack.push(new(uint256.Int).SetUint64(size))
+		stack.push(new(uint256.Int))
+		stack.push(new(uint256.Int))
+		return stack
+	}
+
+	stack := pushCreateArgs(33)
+	gas, err := gasCreateEip3860(nil, nil, stack, nil, 0)
+	returnStack(stack)
+	if err != nil {
+		t.Fatalf("gasCreateEip3860 returned error: %v", err)
+	}
+	if want := params.InitCodeWordGas * 2; gas != want {
+		t.Fatalf("gasCreateEip3860 gas = %d, want %d", gas, want)
+	}
+
+	stack = pushCreateArgs(33)
+	gas, err = gasCreate2Eip3860(nil, nil, stack, nil, 0)
+	returnStack(stack)
+	if err != nil {
+		t.Fatalf("gasCreate2Eip3860 returned error: %v", err)
+	}
+	if want := (params.InitCodeWordGas + params.Sha3WordGas) * 2; gas != want {
+		t.Fatalf("gasCreate2Eip3860 gas = %d, want %d", gas, want)
+	}
+
+	stack = pushCreateArgs(params.MaxInitCodeSize + 1)
+	_, err = gasCreateEip3860(nil, nil, stack, nil, 0)
+	returnStack(stack)
+	if !errors.Is(err, ErrMaxInitCodeSizeExceeded) {
+		t.Fatalf("gasCreateEip3860 over-limit error = %v, want %v", err, ErrMaxInitCodeSizeExceeded)
 	}
 }

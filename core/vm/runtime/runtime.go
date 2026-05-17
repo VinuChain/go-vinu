@@ -68,6 +68,7 @@ func setDefaults(cfg *Config) {
 			MuirGlacierBlock:    new(big.Int),
 			BerlinBlock:         new(big.Int),
 			LondonBlock:         new(big.Int),
+			ShanghaiBlock:       new(big.Int),
 		}
 	}
 
@@ -120,6 +121,9 @@ func Execute(code, input []byte, cfg *Config) ([]byte, *state.StateDB, error) {
 	)
 	if rules := cfg.ChainConfig.Rules(vmenv.Context.BlockNumber); rules.IsBerlin {
 		cfg.State.PrepareAccessList(cfg.Origin, &address, vm.ActivePrecompiles(rules), nil)
+		if rules.IsShanghai {
+			cfg.State.AddAddressToAccessList(cfg.Coinbase)
+		}
 	}
 	cfg.State.CreateAccount(address)
 	// set the receiver's (the executing contract) code for execution.
@@ -152,6 +156,9 @@ func Create(input []byte, cfg *Config) ([]byte, common.Address, uint64, error) {
 	)
 	if rules := cfg.ChainConfig.Rules(vmenv.Context.BlockNumber); rules.IsBerlin {
 		cfg.State.PrepareAccessList(cfg.Origin, nil, vm.ActivePrecompiles(rules), nil)
+		if rules.IsShanghai {
+			cfg.State.AddAddressToAccessList(cfg.Coinbase)
+		}
 	}
 	// Call the code with the given configuration.
 	code, address, leftOverGas, err := vmenv.Create(
@@ -178,6 +185,9 @@ func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, er
 
 	if rules := cfg.ChainConfig.Rules(vmenv.Context.BlockNumber); rules.IsBerlin {
 		statedb.PrepareAccessList(cfg.Origin, &address, vm.ActivePrecompiles(rules), nil)
+		if rules.IsShanghai {
+			statedb.AddAddressToAccessList(cfg.Coinbase)
+		}
 	}
 	// Call the code with the given configuration.
 	ret, leftOverGas, err := vmenv.Call(

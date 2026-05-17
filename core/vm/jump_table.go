@@ -58,6 +58,7 @@ var (
 	istanbulInstructionSet         = newIstanbulInstructionSet()
 	berlinInstructionSet           = newBerlinInstructionSet()
 	londonInstructionSet           = newLondonInstructionSet()
+	shanghaiInstructionSet         = newShanghaiInstructionSet()
 )
 
 // JumpTable contains the EVM opcodes supported at a given fork.
@@ -69,6 +70,16 @@ func newLondonInstructionSet() JumpTable {
 	instructionSet := newBerlinInstructionSet()
 	enable3529(&instructionSet) // EIP-3529: Reduction in refunds https://eips.ethereum.org/EIPS/eip-3529
 	enable3198(&instructionSet) // Base fee opcode https://eips.ethereum.org/EIPS/eip-3198
+	return instructionSet
+}
+
+// newShanghaiInstructionSet returns the London instructions plus the Shanghai
+// EVM compatibility changes that are applicable without Ethereum beacon
+// withdrawals.
+func newShanghaiInstructionSet() JumpTable {
+	instructionSet := newLondonInstructionSet()
+	enable3855(&instructionSet) // EIP-3855: PUSH0 instruction
+	enable3860(&instructionSet) // EIP-3860: Limit and meter initcode
 	return instructionSet
 }
 
