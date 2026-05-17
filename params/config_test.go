@@ -96,3 +96,18 @@ func TestCheckCompatible(t *testing.T) {
 		}
 	}
 }
+
+func TestRulesCancun(t *testing.T) {
+	config := &ChainConfig{
+		ChainID:       big.NewInt(1),
+		LondonBlock:   big.NewInt(0),
+		ShanghaiBlock: big.NewInt(10),
+		CancunBlock:   big.NewInt(20),
+	}
+	if config.Rules(big.NewInt(19)).IsCancun {
+		t.Fatal("Cancun active before configured block")
+	}
+	if !config.Rules(big.NewInt(20)).IsCancun {
+		t.Fatal("Cancun inactive at configured block")
+	}
+}

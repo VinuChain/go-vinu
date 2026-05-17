@@ -915,3 +915,34 @@ func TestStateDBAccessList(t *testing.T) {
 		t.Fatalf("expected empty, got %d", got)
 	}
 }
+
+func TestStateDBTransientStorage(t *testing.T) {
+	state, _ := New(common.Hash{}, NewDatabase(rawdb.NewMemoryDatabase()), nil)
+	addr := common.HexToAddress("0x1234")
+	key := common.HexToHash("0x01")
+	one := common.HexToHash("0x01")
+	two := common.HexToHash("0x02")
+
+	if got := state.GetTransientState(addr, key); got != (common.Hash{}) {
+		t.Fatalf("empty transient storage = %x, want zero", got)
+	}
+	state.SetTransientState(addr, key, one)
+	if got := state.GetTransientState(addr, key); got != one {
+		t.Fatalf("transient storage = %x, want %x", got, one)
+	}
+
+	snapshot := state.Snapshot()
+	state.SetTransientState(addr, key, two)
+	if got := state.GetTransientState(addr, key); got != two {
+		t.Fatalf("updated transient storage = %x, want %x", got, two)
+	}
+	state.RevertToSnapshot(snapshot)
+	if got := state.GetTransientState(addr, key); got != one {
+		t.Fatalf("reverted transient storage = %x, want %x", got, one)
+	}
+
+	state.Prepare(common.Hash{}, 0)
+	if got := state.GetTransientState(addr, key); got != (common.Hash{}) {
+		t.Fatalf("prepared transient storage = %x, want zero", got)
+	}
+}

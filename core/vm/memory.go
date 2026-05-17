@@ -61,6 +61,14 @@ func (m *Memory) Set32(offset uint64, val *uint256.Int) {
 	val.WriteToSlice(m.store[offset:])
 }
 
+// Copy copies size bytes from src to dst. The source and destination may overlap.
+func (m *Memory) Copy(dst, src, size uint64) {
+	if size == 0 {
+		return
+	}
+	copy(m.store[dst:dst+size], m.store[src:src+size])
+}
+
 // Resize resizes the memory to size
 func (m *Memory) Resize(size uint64) {
 	if uint64(m.Len()) < size {

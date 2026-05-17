@@ -14,6 +14,7 @@ func TestShanghaiPUSH0Activation(t *testing.T) {
 	code := common.FromHex("0x5f60005260206000f3")
 	london := *params.TestChainConfig
 	london.ShanghaiBlock = nil
+	london.CancunBlock = nil
 
 	_, _, err := Execute(code, nil, &Config{ChainConfig: &london})
 	var invalid *vm.ErrInvalidOpCode
@@ -23,6 +24,7 @@ func TestShanghaiPUSH0Activation(t *testing.T) {
 
 	shanghai := london
 	shanghai.ShanghaiBlock = big.NewInt(0)
+	shanghai.CancunBlock = nil
 	ret, _, err := Execute(code, nil, &Config{ChainConfig: &shanghai})
 	if err != nil {
 		t.Fatal(err)

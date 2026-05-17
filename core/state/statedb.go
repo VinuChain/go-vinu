@@ -100,6 +100,9 @@ type StateDB struct {
 	// Per-transaction access list
 	accessList *accessList
 
+	// Per-transaction transient storage
+	transientStorage transientStorage
+
 	// Journal of state modifications. This is the backbone of
 	// Snapshot and RevertToSnapshot.
 	journal        *journal
@@ -142,6 +145,7 @@ func NewWithSnapLayers(root common.Hash, db Database, snaps *snapshot.Tree, laye
 		preimages:           make(map[common.Hash][]byte),
 		journal:             newJournal(),
 		accessList:          newAccessList(),
+		transientStorage:    newTransientStorage(),
 		hasher:              crypto.NewKeccakState(),
 		snapMaxLayers:       layers,
 	}
@@ -314,6 +318,11 @@ func (s *StateDB) GetState(addr common.Address, hash common.Hash) common.Hash {
 	return common.Hash{}
 }
 
+// GetTransientState retrieves a value from the given account's transient storage.
+func (s *StateDB) GetTransientState(addr common.Address, key common.Hash) common.Hash {
+	return s.transientStorage.Get(addr, key)
+}
+
 // GetProof returns the Merkle proof for a given account.
 func (s *StateDB) GetProof(addr common.Address) ([][]byte, error) {
 	return s.GetProofByHash(crypto.Keccak256Hash(addr.Bytes()))
@@ -417,6 +426,25 @@ func (s *StateDB) SetState(addr common.Address, key, value common.Hash) {
 	if stateObject != nil {
 		stateObject.SetState(s.db, key, value)
 	}
+}
+
+// SetTransientState sets transient storage and journals the previous value so
+// call-frame reverts restore it without persisting it to the state trie.
+func (s *StateDB) SetTransientState(addr common.Address, key, value common.Hash) {
+	prev := s.GetTransientState(addr, key)
+	if prev == value {
+		return
+	}
+	s.journal.append(transientStorageChange{
+		account:  &addr,
+		key:      key,
+		prevalue: prev,
+	})
+	s.setTransientState(addr, key, value)
+}
+
+func (s *StateDB) setTransientState(addr common.Address, key, value common.Hash) {
+	s.transientStorage.Set(addr, key, value)
 }
 
 // SetStorage replaces the entire storage for the specified account with given
@@ -608,8 +636,8 @@ func (s *StateDB) createObject(addr common.Address) (newobj, prev *stateObject) 
 // CreateAccount is called during the EVM CREATE operation. The situation might arise that
 // a contract does the following:
 //
-//   1. sends funds to sha(account ++ (nonce + 1))
-//   2. tx_create(sha(account ++ nonce)) (note that this gets the address of 1)
+//  1. sends funds to sha(account ++ (nonce + 1))
+//  2. tx_create(sha(account ++ nonce)) (note that this gets the address of 1)
 //
 // Carrying over the balance ensures that Ether doesn't disappear.
 func (s *StateDB) CreateAccount(addr common.Address) {
@@ -663,6 +691,7 @@ func (s *StateDB) Copy() *StateDB {
 		logSize:             s.logSize,
 		preimages:           make(map[common.Hash][]byte, len(s.preimages)),
 		journal:             newJournal(),
+		transientStorage:    s.transientStorage.Copy(),
 		hasher:              crypto.NewKeccakState(),
 	}
 	// Copy the dirty states, logs, and preimages
@@ -890,6 +919,7 @@ func (s *StateDB) Prepare(thash common.Hash, ti int) {
 	s.thash = thash
 	s.txIndex = ti
 	s.accessList = newAccessList()
+	s.transientStorage = newTransientStorage()
 }
 
 func (s *StateDB) clearJournalAndRefund() {

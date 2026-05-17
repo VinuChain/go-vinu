@@ -59,6 +59,7 @@ var (
 	berlinInstructionSet           = newBerlinInstructionSet()
 	londonInstructionSet           = newLondonInstructionSet()
 	shanghaiInstructionSet         = newShanghaiInstructionSet()
+	cancunInstructionSet           = newCancunInstructionSet()
 )
 
 // JumpTable contains the EVM opcodes supported at a given fork.
@@ -80,6 +81,15 @@ func newShanghaiInstructionSet() JumpTable {
 	instructionSet := newLondonInstructionSet()
 	enable3855(&instructionSet) // EIP-3855: PUSH0 instruction
 	enable3860(&instructionSet) // EIP-3860: Limit and meter initcode
+	return instructionSet
+}
+
+// newCancunInstructionSet returns the Shanghai instructions plus the Cancun EVM
+// opcode changes that do not depend on blob transactions or beacon roots.
+func newCancunInstructionSet() JumpTable {
+	instructionSet := newShanghaiInstructionSet()
+	enable1153(&instructionSet) // EIP-1153: Transient storage opcodes
+	enable5656(&instructionSet) // EIP-5656: MCOPY instruction
 	return instructionSet
 }
 
