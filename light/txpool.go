@@ -385,6 +385,22 @@ func (pool *TxPool) validateTx(ctx context.Context, tx *types.Transaction) error
 	if n := currentState.GetNonce(from); n > tx.Nonce() {
 		return core.ErrNonceTooLow
 	}
+	if code := currentState.GetCode(from); len(code) != 0 {
+		if !pool.prague {
+			return core.ErrSenderNoEOA
+		}
+		if _, ok := types.ParseDelegation(code); !ok {
+			return core.ErrSenderNoEOA
+		}
+		if tx.Nonce() > currentState.GetNonce(from) || pool.hasPendingFrom(from, tx.Hash()) {
+			return core.ErrOutOfOrderTxFromDelegated
+		}
+	}
+	if tx.Type() == types.SetCodeTxType {
+		if err := pool.validateSetCodeAuthorities(from, tx); err != nil {
+			return err
+		}
+	}
 
 	// Check the transaction doesn't exceed the current
 	// block limit gas.
@@ -418,6 +434,56 @@ func (pool *TxPool) validateTx(ctx context.Context, tx *types.Transaction) error
 		return core.ErrIntrinsicGas
 	}
 	return currentState.Error()
+}
+
+func (pool *TxPool) hasPendingFrom(addr common.Address, txHash common.Hash) bool {
+	for hash, tx := range pool.pending {
+		if hash == txHash {
+			continue
+		}
+		from, err := types.Sender(pool.signer, tx)
+		if err == nil && from == addr {
+			return true
+		}
+	}
+	return false
+}
+
+func (pool *TxPool) validateSetCodeAuthorities(sender common.Address, tx *types.Transaction) error {
+	seen := make(map[common.Address]struct{})
+	for _, auth := range tx.SetCodeAuthorizations() {
+		authority, err := auth.Authority()
+		if err != nil {
+			continue
+		}
+		if _, ok := seen[authority]; ok {
+			continue
+		}
+		seen[authority] = struct{}{}
+		pendingFromAuthority := 0
+		for hash, pooled := range pool.pending {
+			if hash == tx.Hash() {
+				continue
+			}
+			pooledSender, err := types.Sender(pool.signer, pooled)
+			if err == nil && pooledSender == sender && pooled.Nonce() == tx.Nonce() {
+				continue
+			}
+			if err == nil && pooledSender == authority {
+				pendingFromAuthority++
+				if pendingFromAuthority > 1 {
+					return core.ErrAuthorityReserved
+				}
+			}
+			for _, pooledAuth := range pooled.SetCodeAuthorizations() {
+				pooledAuthority, err := pooledAuth.Authority()
+				if err == nil && pooledAuthority == authority {
+					return core.ErrAuthorityReserved
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // add validates a new transaction and sets its state pending if processable.
