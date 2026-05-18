@@ -90,6 +90,40 @@ func TestCancunMCOPYActivation(t *testing.T) {
 	}
 }
 
+func TestCancunMCOPYOverlap(t *testing.T) {
+	_, cancun := cancunTestConfigs()
+	value := []byte{
+		0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+		0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+		0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+		0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+	}
+	code := []byte{byte(vm.PUSH32)}
+	code = append(code, value...)
+	code = append(code,
+		byte(vm.PUSH0),
+		byte(vm.MSTORE),
+		byte(vm.PUSH1), 0x1f,
+		byte(vm.PUSH0),
+		byte(vm.PUSH1), 0x01,
+		byte(vm.MCOPY),
+		byte(vm.PUSH1), 0x20,
+		byte(vm.PUSH0),
+		byte(vm.RETURN),
+	)
+
+	ret, _, err := Execute(code, nil, &Config{ChainConfig: cancun})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := make([]byte, 32)
+	expected[0] = value[0]
+	copy(expected[1:], value[:31])
+	if !bytes.Equal(ret, expected) {
+		t.Fatalf("overlapping MCOPY return = %x, want %x", ret, expected)
+	}
+}
+
 func TestCancunSelfdestructExistingContractTransfersOnly(t *testing.T) {
 	shanghai, cancun := cancunTestConfigs()
 	contract := common.HexToAddress("0x100")
@@ -118,6 +152,28 @@ func TestCancunSelfdestructExistingContractTransfersOnly(t *testing.T) {
 	}
 	if got := cancunState.GetCodeSize(contract); got == 0 {
 		t.Fatal("Cancun SELFDESTRUCT deleted code for an existing contract")
+	}
+}
+
+func TestCancunSelfdestructCreatedContractStillDeletes(t *testing.T) {
+	_, cancun := cancunTestConfigs()
+	beneficiary := common.HexToAddress("0x200")
+	statedb, err := state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	initcode := append([]byte{byte(vm.PUSH20)}, beneficiary.Bytes()...)
+	initcode = append(initcode, byte(vm.SELFDESTRUCT))
+	_, contract, _, err := Create(initcode, &Config{ChainConfig: cancun, State: statedb})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !statedb.HasSuicided(contract) {
+		t.Fatal("Cancun SELFDESTRUCT did not delete a contract created in the same transaction")
+	}
+	if got := statedb.GetCodeSize(contract); got != 0 {
+		t.Fatalf("created-and-destroyed contract code size = %d, want 0", got)
 	}
 }
 

@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/params"
 )
@@ -49,5 +51,45 @@ func TestShanghaiWarmsCoinbase(t *testing.T) {
 	}
 	if !state.AddressInAccessList(coinbase) {
 		t.Fatalf("coinbase %s was not warmed under Shanghai rules", coinbase)
+	}
+}
+
+func TestShanghaiWarmCoinbaseReducesBalanceGas(t *testing.T) {
+	coinbase := common.HexToAddress("0x000000000000000000000000000000000000c0de")
+	contract := common.HexToAddress("0x100")
+	code := append([]byte{byte(vm.PUSH20)}, coinbase.Bytes()...)
+	code = append(code, byte(vm.BALANCE), byte(vm.POP), byte(vm.STOP))
+
+	london := *params.TestChainConfig
+	london.ShanghaiBlock = nil
+	london.CancunBlock = nil
+	shanghai := london
+	shanghai.ShanghaiBlock = big.NewInt(0)
+
+	run := func(config *params.ChainConfig) uint64 {
+		statedb, err := state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		statedb.CreateAccount(contract)
+		statedb.SetCode(contract, code)
+		statedb.Prepare(common.Hash{}, 0)
+
+		_, left, err := Call(contract, nil, &Config{
+			ChainConfig: config,
+			Coinbase:    coinbase,
+			GasLimit:    100000,
+			State:       statedb,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return left
+	}
+
+	londonLeft := run(&london)
+	shanghaiLeft := run(&shanghai)
+	if shanghaiLeft <= londonLeft {
+		t.Fatalf("Shanghai coinbase BALANCE left gas = %d, want greater than pre-Shanghai %d", shanghaiLeft, londonLeft)
 	}
 }
