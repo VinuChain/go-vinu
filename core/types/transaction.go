@@ -42,9 +42,11 @@ var (
 
 // Transaction types.
 const (
-	LegacyTxType = iota
-	AccessListTxType
-	DynamicFeeTxType
+	LegacyTxType     = 0x00
+	AccessListTxType = 0x01
+	DynamicFeeTxType = 0x02
+	BlobTxType       = 0x03
+	SetCodeTxType    = 0x04
 )
 
 // Transaction is an Ethereum transaction.
@@ -186,6 +188,16 @@ func (tx *Transaction) decodeTyped(b []byte) (TxData, error) {
 		var inner DynamicFeeTx
 		err := rlp.DecodeBytes(b[1:], &inner)
 		return &inner, err
+	case SetCodeTxType:
+		var inner SetCodeTx
+		err := rlp.DecodeBytes(b[1:], &inner)
+		if err != nil {
+			return nil, err
+		}
+		if err := ValidateSetCodeAuthorizations(inner.AuthList); err != nil {
+			return nil, err
+		}
+		return &inner, nil
 	default:
 		return nil, ErrTxTypeNotSupported
 	}
@@ -262,6 +274,32 @@ func (tx *Transaction) Data() []byte { return tx.inner.data() }
 
 // AccessList returns the access list of the transaction.
 func (tx *Transaction) AccessList() AccessList { return tx.inner.accessList() }
+
+// SetCodeAuthorizations returns the authorizations of an EIP-7702 transaction.
+func (tx *Transaction) SetCodeAuthorizations() []SetCodeAuthorization {
+	if tx, ok := tx.inner.(*SetCodeTx); ok {
+		return tx.AuthList
+	}
+	return nil
+}
+
+// SetCodeAuthorities returns the recovered authorities of an EIP-7702
+// transaction. Non-set-code transactions return nil, nil.
+func (tx *Transaction) SetCodeAuthorities() ([]common.Address, error) {
+	auths := tx.SetCodeAuthorizations()
+	if auths == nil {
+		return nil, nil
+	}
+	authorities := make([]common.Address, len(auths))
+	for i := range auths {
+		authority, err := auths[i].Authority()
+		if err != nil {
+			return nil, err
+		}
+		authorities[i] = authority
+	}
+	return authorities, nil
+}
 
 // Gas returns the gas limit of the transaction.
 func (tx *Transaction) Gas() uint64 { return tx.inner.gas() }
@@ -605,10 +643,15 @@ type Message struct {
 	gasTipCap  *big.Int
 	data       []byte
 	accessList AccessList
+	authList   []SetCodeAuthorization
 	isFake     bool
 }
 
 func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *big.Int, gasLimit uint64, gasPrice, gasFeeCap, gasTipCap *big.Int, data []byte, accessList AccessList, isFake bool) Message {
+	return NewMessageWithSetCodeAuthorizations(from, to, nonce, amount, gasLimit, gasPrice, gasFeeCap, gasTipCap, data, accessList, nil, isFake)
+}
+
+func NewMessageWithSetCodeAuthorizations(from common.Address, to *common.Address, nonce uint64, amount *big.Int, gasLimit uint64, gasPrice, gasFeeCap, gasTipCap *big.Int, data []byte, accessList AccessList, authList []SetCodeAuthorization, isFake bool) Message {
 	return Message{
 		from:       from,
 		to:         to,
@@ -620,6 +663,7 @@ func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *b
 		gasTipCap:  gasTipCap,
 		data:       data,
 		accessList: accessList,
+		authList:   authList,
 		isFake:     isFake,
 	}
 }
@@ -636,6 +680,7 @@ func (tx *Transaction) AsMessage(s Signer, baseFee *big.Int) (Message, error) {
 		amount:     tx.Value(),
 		data:       tx.Data(),
 		accessList: tx.AccessList(),
+		authList:   tx.SetCodeAuthorizations(),
 		isFake:     false,
 	}
 	// If baseFee provided, set gasPrice to effectiveGasPrice.
@@ -657,4 +702,7 @@ func (m Message) Gas() uint64            { return m.gasLimit }
 func (m Message) Nonce() uint64          { return m.nonce }
 func (m Message) Data() []byte           { return m.data }
 func (m Message) AccessList() AccessList { return m.accessList }
-func (m Message) IsFake() bool           { return m.isFake }
+func (m Message) SetCodeAuthorizations() []SetCodeAuthorization {
+	return m.authList
+}
+func (m Message) IsFake() bool { return m.isFake }

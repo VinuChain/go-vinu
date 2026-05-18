@@ -235,6 +235,7 @@ type TxPool struct {
 	eip2718  bool // Fork indicator whether we are using EIP-2718 type transactions.
 	eip1559  bool // Fork indicator whether we are using EIP-1559 type transactions.
 	shanghai bool // Fork indicator whether Shanghai transaction validation is active.
+	prague   bool // Fork indicator whether Prague/EIP-7702 transaction validation is active.
 
 	currentState  *state.StateDB // Current state in the blockchain head
 	pendingNonces *txNoncer      // Pending state tracking virtual nonces
@@ -578,6 +579,20 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	if !pool.eip1559 && tx.Type() == types.DynamicFeeTxType {
 		return ErrTxTypeNotSupported
 	}
+	if tx.Type() == types.BlobTxType {
+		return ErrTxTypeNotSupported
+	}
+	if tx.Type() == types.SetCodeTxType && !pool.prague {
+		return ErrTxTypeNotSupported
+	}
+	if tx.Type() == types.SetCodeTxType {
+		if len(tx.SetCodeAuthorizations()) == 0 {
+			return ErrEmptyAuthList
+		}
+		if tx.To() == nil {
+			return ErrSetCodeTxCreate
+		}
+	}
 	// Reject transactions over defined size to prevent DOS attacks
 	if uint64(tx.Size()) > txMaxSize {
 		return ErrOversizedData
@@ -624,7 +639,7 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	if pool.shanghai && tx.To() == nil && len(tx.Data()) > params.MaxInitCodeSize {
 		return ErrMaxInitCodeSizeExceeded
 	}
-	intrGas, err := IntrinsicGas(tx.Data(), tx.AccessList(), tx.To() == nil, true, pool.istanbul, pool.shanghai)
+	intrGas, err := IntrinsicGas(tx.Data(), tx.AccessList(), tx.SetCodeAuthorizations(), tx.To() == nil, true, pool.istanbul, pool.shanghai)
 	if err != nil {
 		return err
 	}
@@ -1276,6 +1291,7 @@ func (pool *TxPool) reset(oldHead, newHead *types.Header) {
 	pool.eip2718 = pool.chainconfig.IsBerlin(next)
 	pool.eip1559 = pool.chainconfig.IsLondon(next)
 	pool.shanghai = pool.chainconfig.IsShanghai(next)
+	pool.prague = pool.chainconfig.IsPrague(next)
 }
 
 // promoteExecutables moves transactions that have become processable from the

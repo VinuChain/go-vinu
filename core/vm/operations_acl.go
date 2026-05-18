@@ -21,6 +21,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -165,12 +166,27 @@ func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
 		// The WarmStorageReadCostEIP2929 (100) is already deducted in the form of a constant cost, so
 		// the cost to charge for cold access, if any, is Cold - Warm
 		coldCost := params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
+		chargedCost := uint64(0)
 		if !warmAccess {
 			evm.StateDB.AddAddressToAccessList(addr)
 			// Charge the remaining difference here already, to correctly calculate available
 			// gas for call
 			if !contract.UseGas(coldCost) {
 				return 0, ErrOutOfGas
+			}
+			chargedCost += coldCost
+		}
+		if evm.chainRules.IsPrague {
+			if target, ok := types.ParseDelegation(evm.StateDB.GetCode(addr)); ok {
+				eip7702Cost := params.WarmStorageReadCostEIP2929
+				if !evm.StateDB.AddressInAccessList(target) {
+					evm.StateDB.AddAddressToAccessList(target)
+					eip7702Cost = params.ColdAccountAccessCostEIP2929
+				}
+				if !contract.UseGas(eip7702Cost) {
+					return 0, ErrOutOfGas
+				}
+				chargedCost += eip7702Cost
 			}
 		}
 		// Now call the old calculator, which takes into account
@@ -179,15 +195,15 @@ func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
 		// - memory expansion
 		// - 63/64ths rule
 		gas, err := oldCalculator(evm, contract, stack, mem, memorySize)
-		if warmAccess || err != nil {
+		if chargedCost == 0 || err != nil {
 			return gas, err
 		}
 		// In case of a cold access, we temporarily add the cold charge back, and also
 		// add it to the returned gas. By adding it to the return, it will be charged
 		// outside of this function, as part of the dynamic gas, and that will make it
 		// also become correctly reported to tracers.
-		contract.Gas += coldCost
-		return gas + coldCost, nil
+		contract.Gas += chargedCost
+		return gas + chargedCost, nil
 	}
 }
 

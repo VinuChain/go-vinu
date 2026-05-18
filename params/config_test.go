@@ -111,3 +111,19 @@ func TestRulesCancun(t *testing.T) {
 		t.Fatal("Cancun inactive at configured block")
 	}
 }
+
+func TestRulesPrague(t *testing.T) {
+	config := &ChainConfig{
+		ChainID:       big.NewInt(1),
+		LondonBlock:   big.NewInt(0),
+		ShanghaiBlock: big.NewInt(10),
+		CancunBlock:   big.NewInt(20),
+		PragueBlock:   big.NewInt(30),
+	}
+	if config.Rules(big.NewInt(29)).IsPrague {
+		t.Fatal("Prague active before configured block")
+	}
+	if !config.Rules(big.NewInt(30)).IsPrague {
+		t.Fatal("Prague inactive at configured block")
+	}
+}

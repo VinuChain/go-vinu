@@ -70,6 +70,7 @@ type TxPool struct {
 	istanbul bool // Fork indicator whether we are in the istanbul stage.
 	eip2718  bool // Fork indicator whether we are in the eip2718 stage.
 	shanghai bool // Fork indicator whether Shanghai transaction validation is active.
+	prague   bool // Fork indicator whether Prague/EIP-7702 transaction validation is active.
 }
 
 // TxRelayBackend provides an interface to the mechanism that forwards transacions
@@ -92,6 +93,8 @@ type TxRelayBackend interface {
 
 // NewTxPool creates a new light transaction pool
 func NewTxPool(config *params.ChainConfig, chain *LightChain, relay TxRelayBackend) *TxPool {
+	head := chain.CurrentHeader()
+	next := new(big.Int).Add(head.Number, big.NewInt(1))
 	pool := &TxPool{
 		config:      config,
 		signer:      types.LatestSigner(config),
@@ -104,8 +107,12 @@ func NewTxPool(config *params.ChainConfig, chain *LightChain, relay TxRelayBacke
 		relay:       relay,
 		odr:         chain.Odr(),
 		chainDb:     chain.Odr().Database(),
-		head:        chain.CurrentHeader().Hash(),
-		clearIdx:    chain.CurrentHeader().Number.Uint64(),
+		head:        head.Hash(),
+		clearIdx:    head.Number.Uint64(),
+		istanbul:    config.IsIstanbul(next),
+		eip2718:     config.IsBerlin(next),
+		shanghai:    config.IsShanghai(next),
+		prague:      config.IsPrague(next),
 	}
 	// Subscribe events from blockchain
 	pool.chainHeadSub = pool.chain.SubscribeChainHeadEvent(pool.chainHeadCh)
@@ -320,6 +327,7 @@ func (pool *TxPool) setNewHead(head *types.Header) {
 	pool.istanbul = pool.config.IsIstanbul(next)
 	pool.eip2718 = pool.config.IsBerlin(next)
 	pool.shanghai = pool.config.IsShanghai(next)
+	pool.prague = pool.config.IsPrague(next)
 }
 
 // Stop stops the light transaction pool
@@ -349,6 +357,18 @@ func (pool *TxPool) Stats() (pending int) {
 
 // validateTx checks whether a transaction is valid according to the consensus rules.
 func (pool *TxPool) validateTx(ctx context.Context, tx *types.Transaction) error {
+	if !pool.eip2718 && tx.Type() != types.LegacyTxType {
+		return core.ErrTxTypeNotSupported
+	}
+	if tx.Type() == types.BlobTxType {
+		return core.ErrTxTypeNotSupported
+	}
+	if tx.Type() == types.SetCodeTxType && !pool.prague {
+		return core.ErrTxTypeNotSupported
+	}
+	if tx.Type() == types.SetCodeTxType && len(tx.SetCodeAuthorizations()) == 0 {
+		return core.ErrEmptyAuthList
+	}
 	// Validate sender
 	var (
 		from common.Address
@@ -390,7 +410,7 @@ func (pool *TxPool) validateTx(ctx context.Context, tx *types.Transaction) error
 	if pool.shanghai && tx.To() == nil && len(tx.Data()) > params.MaxInitCodeSize {
 		return core.ErrMaxInitCodeSizeExceeded
 	}
-	gas, err := core.IntrinsicGas(tx.Data(), tx.AccessList(), tx.To() == nil, true, pool.istanbul, pool.shanghai)
+	gas, err := core.IntrinsicGas(tx.Data(), tx.AccessList(), tx.SetCodeAuthorizations(), tx.To() == nil, true, pool.istanbul, pool.shanghai)
 	if err != nil {
 		return err
 	}

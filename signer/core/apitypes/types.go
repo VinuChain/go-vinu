@@ -18,6 +18,7 @@ package apitypes
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -51,7 +52,7 @@ func (vs *ValidationMessages) Info(msg string) {
 	vs.Messages = append(vs.Messages, ValidationInfo{INFO, msg})
 }
 
-/// getWarnings returns an error with all messages of type WARN of above, or nil if no warnings were present
+// / getWarnings returns an error with all messages of type WARN of above, or nil if no warnings were present
 func (v *ValidationMessages) GetWarnings() error {
 	var messages []string
 	for _, msg := range v.Messages {
@@ -85,8 +86,9 @@ type SendTxArgs struct {
 	Input *hexutil.Bytes `json:"input,omitempty"`
 
 	// For non-legacy transactions
-	AccessList *types.AccessList `json:"accessList,omitempty"`
-	ChainID    *hexutil.Big      `json:"chainId,omitempty"`
+	AccessList        *types.AccessList            `json:"accessList,omitempty"`
+	ChainID           *hexutil.Big                 `json:"chainId,omitempty"`
+	AuthorizationList []types.SetCodeAuthorization `json:"authorizationList,omitempty"`
 }
 
 func (args SendTxArgs) String() string {
@@ -98,7 +100,7 @@ func (args SendTxArgs) String() string {
 }
 
 // ToTransaction converts the arguments to a transaction.
-func (args *SendTxArgs) ToTransaction() *types.Transaction {
+func (args *SendTxArgs) ToTransaction() (*types.Transaction, error) {
 	// Add the To-field, if specified
 	var to *common.Address
 	if args.To != nil {
@@ -115,6 +117,26 @@ func (args *SendTxArgs) ToTransaction() *types.Transaction {
 
 	var data types.TxData
 	switch {
+	case args.AuthorizationList != nil:
+		al := types.AccessList{}
+		if args.AccessList != nil {
+			al = *args.AccessList
+		}
+		if to == nil {
+			return nil, errors.New("missing required field 'to' for set-code transaction")
+		}
+		data = &types.SetCodeTx{
+			To:         *to,
+			ChainID:    (*big.Int)(args.ChainID),
+			Nonce:      uint64(args.Nonce),
+			Gas:        uint64(args.Gas),
+			GasFeeCap:  (*big.Int)(args.MaxFeePerGas),
+			GasTipCap:  (*big.Int)(args.MaxPriorityFeePerGas),
+			Value:      (*big.Int)(&args.Value),
+			Data:       input,
+			AccessList: al,
+			AuthList:   args.AuthorizationList,
+		}
 	case args.MaxFeePerGas != nil:
 		al := types.AccessList{}
 		if args.AccessList != nil {
@@ -152,5 +174,5 @@ func (args *SendTxArgs) ToTransaction() *types.Transaction {
 			Data:     input,
 		}
 	}
-	return types.NewTx(data)
+	return types.NewTx(data), nil
 }
