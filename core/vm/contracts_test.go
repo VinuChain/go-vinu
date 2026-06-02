@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/params"
 )
 
 // precompiledTest defines the input/output pairs for precompiled contract tests.
@@ -56,15 +57,13 @@ var allPrecompiles = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{7}):    &bn256ScalarMulIstanbul{},
 	common.BytesToAddress([]byte{8}):    &bn256PairingIstanbul{},
 	common.BytesToAddress([]byte{9}):    &blake2F{},
-	common.BytesToAddress([]byte{10}):   &bls12381G1Add{},
-	common.BytesToAddress([]byte{11}):   &bls12381G1Mul{},
-	common.BytesToAddress([]byte{12}):   &bls12381G1MultiExp{},
-	common.BytesToAddress([]byte{13}):   &bls12381G2Add{},
-	common.BytesToAddress([]byte{14}):   &bls12381G2Mul{},
-	common.BytesToAddress([]byte{15}):   &bls12381G2MultiExp{},
-	common.BytesToAddress([]byte{16}):   &bls12381Pairing{},
-	common.BytesToAddress([]byte{17}):   &bls12381MapG1{},
-	common.BytesToAddress([]byte{18}):   &bls12381MapG2{},
+	common.HexToAddress("0x0f0a"):       &bls12381G1Add{},
+	common.HexToAddress("0x0f0b"):       &bls12381G1MultiExp{},
+	common.HexToAddress("0x0f0c"):       &bls12381G2Add{},
+	common.HexToAddress("0x0f0d"):       &bls12381G2MultiExp{},
+	common.HexToAddress("0x0f0e"):       &bls12381Pairing{},
+	common.HexToAddress("0x0f0f"):       &bls12381MapG1{},
+	common.HexToAddress("0x0f10"):       &bls12381MapG2{},
 }
 
 // EIP-152 test vectors
@@ -302,36 +301,98 @@ func benchJson(name, addr string, b *testing.B) {
 	}
 }
 
-func TestPrecompiledBLS12381G1Add(t *testing.T)      { testJson("blsG1Add", "0a", t) }
-func TestPrecompiledBLS12381G1Mul(t *testing.T)      { testJson("blsG1Mul", "0b", t) }
-func TestPrecompiledBLS12381G1MultiExp(t *testing.T) { testJson("blsG1MultiExp", "0c", t) }
-func TestPrecompiledBLS12381G2Add(t *testing.T)      { testJson("blsG2Add", "0d", t) }
-func TestPrecompiledBLS12381G2Mul(t *testing.T)      { testJson("blsG2Mul", "0e", t) }
-func TestPrecompiledBLS12381G2MultiExp(t *testing.T) { testJson("blsG2MultiExp", "0f", t) }
-func TestPrecompiledBLS12381Pairing(t *testing.T)    { testJson("blsPairing", "10", t) }
-func TestPrecompiledBLS12381MapG1(t *testing.T)      { testJson("blsMapG1", "11", t) }
-func TestPrecompiledBLS12381MapG2(t *testing.T)      { testJson("blsMapG2", "12", t) }
+func TestPrecompiledBLS12381G1Add(t *testing.T)      { testJson("blsG1Add", "0f0a", t) }
+func TestPrecompiledBLS12381G1MultiExp(t *testing.T) { testJson("blsG1MultiExp", "0f0b", t) }
+func TestPrecompiledBLS12381G2Add(t *testing.T)      { testJson("blsG2Add", "0f0c", t) }
+func TestPrecompiledBLS12381G2MultiExp(t *testing.T) { testJson("blsG2MultiExp", "0f0d", t) }
+func TestPrecompiledBLS12381Pairing(t *testing.T)    { testJson("blsPairing", "0f0e", t) }
+func TestPrecompiledBLS12381MapG1(t *testing.T)      { testJson("blsMapG1", "0f0f", t) }
+func TestPrecompiledBLS12381MapG2(t *testing.T)      { testJson("blsMapG2", "0f10", t) }
 
-func BenchmarkPrecompiledBLS12381G1Add(b *testing.B)      { benchJson("blsG1Add", "0a", b) }
-func BenchmarkPrecompiledBLS12381G1Mul(b *testing.B)      { benchJson("blsG1Mul", "0b", b) }
-func BenchmarkPrecompiledBLS12381G1MultiExp(b *testing.B) { benchJson("blsG1MultiExp", "0c", b) }
-func BenchmarkPrecompiledBLS12381G2Add(b *testing.B)      { benchJson("blsG2Add", "0d", b) }
-func BenchmarkPrecompiledBLS12381G2Mul(b *testing.B)      { benchJson("blsG2Mul", "0e", b) }
-func BenchmarkPrecompiledBLS12381G2MultiExp(b *testing.B) { benchJson("blsG2MultiExp", "0f", b) }
-func BenchmarkPrecompiledBLS12381Pairing(b *testing.B)    { benchJson("blsPairing", "10", b) }
-func BenchmarkPrecompiledBLS12381MapG1(b *testing.B)      { benchJson("blsMapG1", "11", b) }
-func BenchmarkPrecompiledBLS12381MapG2(b *testing.B)      { benchJson("blsMapG2", "12", b) }
+// Upstream keeps these fixture filenames for single-term MSM coverage. Final
+// EIP-2537 exposes no standalone G1Mul/G2Mul precompile.
+func TestPrecompiledBLS12381G1MSMSingleTerm(t *testing.T) { testJson("blsG1Mul", "0f0b", t) }
+func TestPrecompiledBLS12381G2MSMSingleTerm(t *testing.T) { testJson("blsG2Mul", "0f0d", t) }
+
+func TestPrecompiledBLS12381ActiveAddresses(t *testing.T) {
+	active := make(map[common.Address]bool)
+	for _, addr := range ActivePrecompiles(params.Rules{IsBerlin: true, IsVinuBLS: true}) {
+		active[addr] = true
+	}
+	for _, addr := range []common.Address{
+		common.BytesToAddress([]byte{0x01}),
+		common.BytesToAddress([]byte{0x02}),
+		common.BytesToAddress([]byte{0x03}),
+		common.BytesToAddress([]byte{0x04}),
+		common.BytesToAddress([]byte{0x05}),
+		common.BytesToAddress([]byte{0x06}),
+		common.BytesToAddress([]byte{0x07}),
+		common.BytesToAddress([]byte{0x08}),
+		common.BytesToAddress([]byte{0x09}),
+		common.BytesToAddress([]byte{0x0b}),
+		common.BytesToAddress([]byte{0x0c}),
+		common.BytesToAddress([]byte{0x0d}),
+		common.BytesToAddress([]byte{0x0e}),
+		common.BytesToAddress([]byte{0x0f}),
+		common.BytesToAddress([]byte{0x10}),
+		common.BytesToAddress([]byte{0x11}),
+	} {
+		if !active[addr] {
+			t.Fatalf("expected BLS active precompile %s", addr)
+		}
+		if _, ok := PrecompiledContractsBLS[addr]; !ok {
+			t.Fatalf("expected BLS precompile map entry %s", addr)
+		}
+	}
+	for _, addr := range []common.Address{
+		common.BytesToAddress([]byte{0x0a}),
+		common.BytesToAddress([]byte{0x12}),
+	} {
+		if active[addr] {
+			t.Fatalf("unexpected BLS active precompile %s", addr)
+		}
+		if _, ok := PrecompiledContractsBLS[addr]; ok {
+			t.Fatalf("unexpected BLS precompile map entry %s", addr)
+		}
+	}
+
+	berlinOnly := make(map[common.Address]bool)
+	for _, addr := range ActivePrecompiles(params.Rules{IsBerlin: true}) {
+		berlinOnly[addr] = true
+	}
+	if berlinOnly[common.BytesToAddress([]byte{0x0b})] {
+		t.Fatal("BLS precompile active without VinuBLS rule")
+	}
+}
+
+func BenchmarkPrecompiledBLS12381G1Add(b *testing.B)      { benchJson("blsG1Add", "0f0a", b) }
+func BenchmarkPrecompiledBLS12381G1MultiExp(b *testing.B) { benchJson("blsG1MultiExp", "0f0b", b) }
+func BenchmarkPrecompiledBLS12381G2Add(b *testing.B)      { benchJson("blsG2Add", "0f0c", b) }
+func BenchmarkPrecompiledBLS12381G2MultiExp(b *testing.B) { benchJson("blsG2MultiExp", "0f0d", b) }
+func BenchmarkPrecompiledBLS12381Pairing(b *testing.B)    { benchJson("blsPairing", "0f0e", b) }
+func BenchmarkPrecompiledBLS12381MapG1(b *testing.B)      { benchJson("blsMapG1", "0f0f", b) }
+func BenchmarkPrecompiledBLS12381MapG2(b *testing.B)      { benchJson("blsMapG2", "0f10", b) }
+func BenchmarkPrecompiledBLS12381G1MSMSingleTerm(b *testing.B) {
+	benchJson("blsG1Mul", "0f0b", b)
+}
+func BenchmarkPrecompiledBLS12381G2MSMSingleTerm(b *testing.B) {
+	benchJson("blsG2Mul", "0f0d", b)
+}
 
 // Failure tests
-func TestPrecompiledBLS12381G1AddFail(t *testing.T)      { testJsonFail("blsG1Add", "0a", t) }
-func TestPrecompiledBLS12381G1MulFail(t *testing.T)      { testJsonFail("blsG1Mul", "0b", t) }
-func TestPrecompiledBLS12381G1MultiExpFail(t *testing.T) { testJsonFail("blsG1MultiExp", "0c", t) }
-func TestPrecompiledBLS12381G2AddFail(t *testing.T)      { testJsonFail("blsG2Add", "0d", t) }
-func TestPrecompiledBLS12381G2MulFail(t *testing.T)      { testJsonFail("blsG2Mul", "0e", t) }
-func TestPrecompiledBLS12381G2MultiExpFail(t *testing.T) { testJsonFail("blsG2MultiExp", "0f", t) }
-func TestPrecompiledBLS12381PairingFail(t *testing.T)    { testJsonFail("blsPairing", "10", t) }
-func TestPrecompiledBLS12381MapG1Fail(t *testing.T)      { testJsonFail("blsMapG1", "11", t) }
-func TestPrecompiledBLS12381MapG2Fail(t *testing.T)      { testJsonFail("blsMapG2", "12", t) }
+func TestPrecompiledBLS12381G1AddFail(t *testing.T)      { testJsonFail("blsG1Add", "0f0a", t) }
+func TestPrecompiledBLS12381G1MultiExpFail(t *testing.T) { testJsonFail("blsG1MultiExp", "0f0b", t) }
+func TestPrecompiledBLS12381G2AddFail(t *testing.T)      { testJsonFail("blsG2Add", "0f0c", t) }
+func TestPrecompiledBLS12381G2MultiExpFail(t *testing.T) { testJsonFail("blsG2MultiExp", "0f0d", t) }
+func TestPrecompiledBLS12381PairingFail(t *testing.T)    { testJsonFail("blsPairing", "0f0e", t) }
+func TestPrecompiledBLS12381MapG1Fail(t *testing.T)      { testJsonFail("blsMapG1", "0f0f", t) }
+func TestPrecompiledBLS12381MapG2Fail(t *testing.T)      { testJsonFail("blsMapG2", "0f10", t) }
+func TestPrecompiledBLS12381G1MSMSingleTermFail(t *testing.T) {
+	testJsonFail("blsG1Mul", "0f0b", t)
+}
+func TestPrecompiledBLS12381G2MSMSingleTermFail(t *testing.T) {
+	testJsonFail("blsG2Mul", "0f0d", t)
+}
 
 func loadJson(name string) ([]precompiledTest, error) {
 	data, err := ioutil.ReadFile(fmt.Sprintf("testdata/precompiles/%v.json", name))

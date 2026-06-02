@@ -19,6 +19,7 @@ package forkid
 import (
 	"bytes"
 	"math"
+	"math/big"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -138,6 +139,24 @@ func TestCreation(t *testing.T) {
 				t.Errorf("test %d, case %d: fork ID mismatch: have %x, want %x", i, j, have, ttt.want)
 			}
 		}
+	}
+}
+
+func TestCreationVinuBLS(t *testing.T) {
+	config := *params.TestChainConfig
+	config.VinuBLSBlock = big.NewInt(20)
+	genesis := common.HexToHash("0x01")
+
+	before := NewID(&config, genesis, 19)
+	if before.Next != 20 {
+		t.Fatalf("expected VinuBLS next fork at 20, got %d", before.Next)
+	}
+	after := NewID(&config, genesis, 20)
+	if after.Next != 0 {
+		t.Fatalf("expected no next fork after VinuBLS, got %d", after.Next)
+	}
+	if before.Hash == after.Hash {
+		t.Fatal("expected fork ID hash to change after VinuBLS activation")
 	}
 }
 

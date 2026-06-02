@@ -87,6 +87,17 @@ func TestCheckCompatible(t *testing.T) {
 				RewindTo:     30,
 			},
 		},
+		{
+			stored: &ChainConfig{VinuBLSBlock: big.NewInt(50)},
+			new:    &ChainConfig{VinuBLSBlock: big.NewInt(60)},
+			head:   55,
+			wantErr: &ConfigCompatError{
+				What:         "VinuBLS fork block",
+				StoredConfig: big.NewInt(50),
+				NewConfig:    big.NewInt(60),
+				RewindTo:     49,
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -125,5 +136,22 @@ func TestRulesPrague(t *testing.T) {
 	}
 	if !config.Rules(big.NewInt(30)).IsPrague {
 		t.Fatal("Prague inactive at configured block")
+	}
+}
+
+func TestRulesVinuBLS(t *testing.T) {
+	config := &ChainConfig{
+		ChainID:       big.NewInt(1),
+		LondonBlock:   big.NewInt(0),
+		ShanghaiBlock: big.NewInt(10),
+		CancunBlock:   big.NewInt(20),
+		PragueBlock:   big.NewInt(30),
+		VinuBLSBlock:  big.NewInt(40),
+	}
+	if config.Rules(big.NewInt(39)).IsVinuBLS {
+		t.Fatal("VinuBLS active before configured block")
+	}
+	if !config.Rules(big.NewInt(40)).IsVinuBLS {
+		t.Fatal("VinuBLS inactive at configured block")
 	}
 }
