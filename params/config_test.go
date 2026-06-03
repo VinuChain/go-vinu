@@ -98,6 +98,17 @@ func TestCheckCompatible(t *testing.T) {
 				RewindTo:     49,
 			},
 		},
+		{
+			stored: &ChainConfig{VinuLatestEVMBlock: big.NewInt(50)},
+			new:    &ChainConfig{VinuLatestEVMBlock: big.NewInt(60)},
+			head:   55,
+			wantErr: &ConfigCompatError{
+				What:         "VinuLatestEVM fork block",
+				StoredConfig: big.NewInt(50),
+				NewConfig:    big.NewInt(60),
+				RewindTo:     49,
+			},
+		},
 	}
 
 	for _, test := range tests {
@@ -153,5 +164,35 @@ func TestRulesVinuBLS(t *testing.T) {
 	}
 	if !config.Rules(big.NewInt(40)).IsVinuBLS {
 		t.Fatal("VinuBLS inactive at configured block")
+	}
+}
+
+func TestRulesVinuLatestEVM(t *testing.T) {
+	config := &ChainConfig{
+		ChainID:             big.NewInt(1),
+		HomesteadBlock:      big.NewInt(0),
+		EIP150Block:         big.NewInt(0),
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         big.NewInt(0),
+		ShanghaiBlock:       big.NewInt(10),
+		CancunBlock:         big.NewInt(20),
+		PragueBlock:         big.NewInt(30),
+		VinuBLSBlock:        big.NewInt(40),
+		VinuLatestEVMBlock:  big.NewInt(50),
+	}
+	if config.Rules(big.NewInt(49)).IsVinuLatestEVM {
+		t.Fatal("VinuLatestEVM active before configured block")
+	}
+	if !config.Rules(big.NewInt(50)).IsVinuLatestEVM {
+		t.Fatal("VinuLatestEVM inactive at configured block")
+	}
+	if err := config.CheckConfigForkOrder(); err != nil {
+		t.Fatalf("VinuLatestEVM fork ordering rejected: %v", err)
 	}
 }

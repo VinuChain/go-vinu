@@ -17,6 +17,8 @@
 package vm
 
 import (
+	stdECDSA "crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
@@ -121,12 +123,35 @@ var PrecompiledContractsBLS = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{0x11}): &bls12381MapG2{},
 }
 
+// PrecompiledContractsVinuLatestEVM contains Vinu's latest-EVM precompile set:
+// EIP-2537/BLS, EIP-7823/EIP-7883 MODEXP behavior, and EIP-7951 P256VERIFY.
+var PrecompiledContractsVinuLatestEVM = map[common.Address]PrecompiledContract{
+	common.BytesToAddress([]byte{1}):          &ecrecover{},
+	common.BytesToAddress([]byte{2}):          &sha256hash{},
+	common.BytesToAddress([]byte{3}):          &ripemd160hash{},
+	common.BytesToAddress([]byte{4}):          &dataCopy{},
+	common.BytesToAddress([]byte{5}):          &bigModExp{eip2565: true, eip7823: true, eip7883: true},
+	common.BytesToAddress([]byte{6}):          &bn256AddIstanbul{},
+	common.BytesToAddress([]byte{7}):          &bn256ScalarMulIstanbul{},
+	common.BytesToAddress([]byte{8}):          &bn256PairingIstanbul{},
+	common.BytesToAddress([]byte{9}):          &blake2F{},
+	common.BytesToAddress([]byte{0x0b}):       &bls12381G1Add{},
+	common.BytesToAddress([]byte{0x0c}):       &bls12381G1MultiExp{},
+	common.BytesToAddress([]byte{0x0d}):       &bls12381G2Add{},
+	common.BytesToAddress([]byte{0x0e}):       &bls12381G2MultiExp{},
+	common.BytesToAddress([]byte{0x0f}):       &bls12381Pairing{},
+	common.BytesToAddress([]byte{0x10}):       &bls12381MapG1{},
+	common.BytesToAddress([]byte{0x11}):       &bls12381MapG2{},
+	common.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{},
+}
+
 var (
-	PrecompiledAddressesBLS       []common.Address
-	PrecompiledAddressesBerlin    []common.Address
-	PrecompiledAddressesIstanbul  []common.Address
-	PrecompiledAddressesByzantium []common.Address
-	PrecompiledAddressesHomestead []common.Address
+	PrecompiledAddressesVinuLatestEVM []common.Address
+	PrecompiledAddressesBLS           []common.Address
+	PrecompiledAddressesBerlin        []common.Address
+	PrecompiledAddressesIstanbul      []common.Address
+	PrecompiledAddressesByzantium     []common.Address
+	PrecompiledAddressesHomestead     []common.Address
 )
 
 func init() {
@@ -145,11 +170,16 @@ func init() {
 	for k := range PrecompiledContractsBLS {
 		PrecompiledAddressesBLS = append(PrecompiledAddressesBLS, k)
 	}
+	for k := range PrecompiledContractsVinuLatestEVM {
+		PrecompiledAddressesVinuLatestEVM = append(PrecompiledAddressesVinuLatestEVM, k)
+	}
 }
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules params.Rules) []common.Address {
 	switch {
+	case rules.IsVinuLatestEVM:
+		return PrecompiledAddressesVinuLatestEVM
 	case rules.IsVinuBLS:
 		return PrecompiledAddressesBLS
 	case rules.IsBerlin:
@@ -264,6 +294,8 @@ func (c *dataCopy) Run(in []byte) ([]byte, error) {
 // bigModExp implements a native big integer exponential modular operation.
 type bigModExp struct {
 	eip2565 bool
+	eip7823 bool
+	eip7883 bool
 }
 
 var (
@@ -283,6 +315,8 @@ var (
 	big3072   = big.NewInt(3072)
 	big199680 = big.NewInt(199680)
 )
+
+var errModExpInputTooLarge = errors.New("modexp input length exceeds 1024 bytes")
 
 // modexpMultComplexity implements bigModexp multComplexity formula, as defined in EIP-198
 //
@@ -320,6 +354,9 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 		expLen  = new(big.Int).SetBytes(getData(input, 32, 32))
 		modLen  = new(big.Int).SetBytes(getData(input, 64, 32))
 	)
+	if c.eip7823 && (baseLen.Cmp(big1024) > 0 || expLen.Cmp(big1024) > 0 || modLen.Cmp(big1024) > 0) {
+		return math.MaxUint64
+	}
 	if len(input) > 96 {
 		input = input[96:]
 	} else {
@@ -344,33 +381,43 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 	adjExpLen := new(big.Int)
 	if expLen.Cmp(big32) > 0 {
 		adjExpLen.Sub(expLen, big32)
-		adjExpLen.Mul(big8, adjExpLen)
+		if c.eip7883 {
+			adjExpLen.Mul(big16, adjExpLen)
+		} else {
+			adjExpLen.Mul(big8, adjExpLen)
+		}
 	}
 	adjExpLen.Add(adjExpLen, big.NewInt(int64(msb)))
 	// Calculate the gas cost of the operation
 	gas := new(big.Int).Set(math.BigMax(modLen, baseLen))
 	if c.eip2565 {
-		// EIP-2565 has three changes
-		// 1. Different multComplexity (inlined here)
-		// in EIP-2565 (https://eips.ethereum.org/EIPS/eip-2565):
-		//
-		// def mult_complexity(x):
-		//    ceiling(x/8)^2
-		//
-		//where is x is max(length_of_MODULUS, length_of_BASE)
 		gas = gas.Add(gas, big7)
 		gas = gas.Div(gas, big8)
-		gas.Mul(gas, gas)
+		if c.eip7883 {
+			if math.BigMax(modLen, baseLen).Cmp(big32) <= 0 {
+				gas.Set(big16)
+			} else {
+				gas.Mul(gas, gas)
+				gas.Mul(gas, big.NewInt(2))
+			}
+		} else {
+			gas.Mul(gas, gas)
+		}
 
 		gas.Mul(gas, math.BigMax(adjExpLen, big1))
-		// 2. Different divisor (`GQUADDIVISOR`) (3)
-		gas.Div(gas, big3)
+		if !c.eip7883 {
+			// EIP-2565 uses a divisor (`GQUADDIVISOR`) of 3.
+			gas.Div(gas, big3)
+		}
 		if gas.BitLen() > 64 {
 			return math.MaxUint64
 		}
-		// 3. Minimum price of 200 gas
-		if gas.Uint64() < 200 {
-			return 200
+		minGas := uint64(200)
+		if c.eip7883 {
+			minGas = 500
+		}
+		if gas.Uint64() < minGas {
+			return minGas
 		}
 		return gas.Uint64()
 	}
@@ -386,10 +433,16 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 
 func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	var (
-		baseLen = new(big.Int).SetBytes(getData(input, 0, 32)).Uint64()
-		expLen  = new(big.Int).SetBytes(getData(input, 32, 32)).Uint64()
-		modLen  = new(big.Int).SetBytes(getData(input, 64, 32)).Uint64()
+		baseLenBig = new(big.Int).SetBytes(getData(input, 0, 32))
+		expLenBig  = new(big.Int).SetBytes(getData(input, 32, 32))
+		modLenBig  = new(big.Int).SetBytes(getData(input, 64, 32))
 	)
+	if c.eip7823 && (baseLenBig.Cmp(big1024) > 0 || expLenBig.Cmp(big1024) > 0 || modLenBig.Cmp(big1024) > 0) {
+		return nil, errModExpInputTooLarge
+	}
+	baseLen := baseLenBig.Uint64()
+	expLen := expLenBig.Uint64()
+	modLen := modLenBig.Uint64()
 	if len(input) > 96 {
 		input = input[96:]
 	} else {
@@ -410,6 +463,43 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		return common.LeftPadBytes([]byte{}, int(modLen)), nil
 	}
 	return common.LeftPadBytes(base.Exp(base, exp, mod).Bytes(), int(modLen)), nil
+}
+
+type p256Verify struct{}
+
+func (c *p256Verify) RequiredGas(input []byte) uint64 {
+	return 6900
+}
+
+func (c *p256Verify) Run(input []byte) ([]byte, error) {
+	if len(input) != 160 {
+		return []byte{}, nil
+	}
+	curve := elliptic.P256()
+	curveParams := curve.Params()
+	hash := input[:32]
+	r := new(big.Int).SetBytes(input[32:64])
+	s := new(big.Int).SetBytes(input[64:96])
+	qx := new(big.Int).SetBytes(input[96:128])
+	qy := new(big.Int).SetBytes(input[128:160])
+
+	if r.Sign() <= 0 || r.Cmp(curveParams.N) >= 0 || s.Sign() <= 0 || s.Cmp(curveParams.N) >= 0 {
+		return []byte{}, nil
+	}
+	if qx.Cmp(curveParams.P) >= 0 || qy.Cmp(curveParams.P) >= 0 {
+		return []byte{}, nil
+	}
+	if qx.Sign() == 0 && qy.Sign() == 0 {
+		return []byte{}, nil
+	}
+	if !curve.IsOnCurve(qx, qy) {
+		return []byte{}, nil
+	}
+	pub := &stdECDSA.PublicKey{Curve: curve, X: qx, Y: qy}
+	if !stdECDSA.Verify(pub, hash, r, s) {
+		return []byte{}, nil
+	}
+	return common.LeftPadBytes([]byte{1}, 32), nil
 }
 
 // newCurvePoint unmarshals a binary blob into a bn256 elliptic curve point,

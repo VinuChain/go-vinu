@@ -18,9 +18,15 @@ package vm
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"math"
+	"math/big"
 	"testing"
 	"time"
 
@@ -64,6 +70,129 @@ var allPrecompiles = map[common.Address]PrecompiledContract{
 	common.HexToAddress("0x0f0e"):       &bls12381Pairing{},
 	common.HexToAddress("0x0f0f"):       &bls12381MapG1{},
 	common.HexToAddress("0x0f10"):       &bls12381MapG2{},
+	common.HexToAddress("0x0100"):       &p256Verify{},
+}
+
+func TestPrecompiledP256Verify(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.Sum256([]byte("vinu latest evm p256"))
+	r, s, err := ecdsa.Sign(rand.Reader, key, hash[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := make([]byte, 160)
+	copy(input[0:32], hash[:])
+	r.FillBytes(input[32:64])
+	s.FillBytes(input[64:96])
+	key.X.FillBytes(input[96:128])
+	key.Y.FillBytes(input[128:160])
+
+	p := &p256Verify{}
+	if gas := p.RequiredGas(input); gas != 6900 {
+		t.Fatalf("P256VERIFY gas = %d, want 6900", gas)
+	}
+	out, remaining, err := RunPrecompiledContract(p, input, 6900)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 0 {
+		t.Fatalf("P256VERIFY remaining gas = %d, want 0", remaining)
+	}
+	if want := common.LeftPadBytes([]byte{1}, 32); !bytes.Equal(out, want) {
+		t.Fatalf("P256VERIFY output = %x, want %x", out, want)
+	}
+
+	input[159] ^= 0x01
+	out, _, err = RunPrecompiledContract(p, input, 6900)
+	if err != nil {
+		t.Fatalf("invalid P256VERIFY returned error: %v", err)
+	}
+	if len(out) != 0 {
+		t.Fatalf("invalid P256VERIFY output = %x, want empty", out)
+	}
+}
+
+func TestPrecompiledP256VerifyRejectsMalformedInput(t *testing.T) {
+	p := &p256Verify{}
+	for _, input := range [][]byte{
+		nil,
+		make([]byte, 159),
+		make([]byte, 161),
+		make([]byte, 160),
+	} {
+		out, _, err := RunPrecompiledContract(p, input, 6900)
+		if err != nil {
+			t.Fatalf("malformed P256VERIFY returned error: %v", err)
+		}
+		if len(out) != 0 {
+			t.Fatalf("malformed P256VERIFY output = %x, want empty", out)
+		}
+	}
+}
+
+func TestPrecompiledModExpVinuLatestEVMGasAndBounds(t *testing.T) {
+	input := make([]byte, 96+96)
+	big.NewInt(32).FillBytes(input[0:32])
+	big.NewInt(32).FillBytes(input[32:64])
+	big.NewInt(32).FillBytes(input[64:96])
+	big.NewInt(2).FillBytes(input[96:128])
+	big.NewInt(2).FillBytes(input[128:160])
+	big.NewInt(5).FillBytes(input[160:192])
+
+	berlin := &bigModExp{eip2565: true}
+	latest := &bigModExp{eip2565: true, eip7823: true, eip7883: true}
+	if gas := berlin.RequiredGas(input); gas != 200 {
+		t.Fatalf("EIP-2565 MODEXP gas = %d, want 200", gas)
+	}
+	if gas := latest.RequiredGas(input); gas != 500 {
+		t.Fatalf("EIP-7883 MODEXP gas = %d, want 500", gas)
+	}
+	out, _, err := RunPrecompiledContract(latest, input, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := common.LeftPadBytes([]byte{4}, 32); !bytes.Equal(out, want) {
+		t.Fatalf("MODEXP output = %x, want %x", out, want)
+	}
+
+	oversize := make([]byte, 96)
+	big.NewInt(1025).FillBytes(oversize[0:32])
+	big.NewInt(1).FillBytes(oversize[32:64])
+	big.NewInt(1).FillBytes(oversize[64:96])
+	if gas := latest.RequiredGas(oversize); gas != math.MaxUint64 {
+		t.Fatalf("oversized MODEXP gas = %d, want MaxUint64", gas)
+	}
+	_, _, err = RunPrecompiledContract(latest, oversize, math.MaxUint64)
+	if err != errModExpInputTooLarge {
+		t.Fatalf("oversized MODEXP error = %v, want %v", err, errModExpInputTooLarge)
+	}
+}
+
+func TestVinuLatestEVMActivePrecompiles(t *testing.T) {
+	p256Addr := common.BytesToAddress([]byte{0x01, 0x00})
+	if _, ok := PrecompiledContractsBLS[p256Addr]; ok {
+		t.Fatal("P256VERIFY must not be active in the BLS-only precompile set")
+	}
+	if _, ok := PrecompiledContractsVinuLatestEVM[p256Addr]; !ok {
+		t.Fatal("P256VERIFY missing from VinuLatestEVM precompile set")
+	}
+	if _, ok := PrecompiledContractsVinuLatestEVM[common.BytesToAddress([]byte{5})].(*bigModExp); !ok {
+		t.Fatal("MODEXP missing from VinuLatestEVM precompile set")
+	}
+
+	active := make(map[common.Address]struct{})
+	for _, addr := range ActivePrecompiles(params.Rules{IsBerlin: true, IsVinuBLS: true, IsVinuLatestEVM: true}) {
+		active[addr] = struct{}{}
+	}
+	if _, ok := active[p256Addr]; !ok {
+		t.Fatal("P256VERIFY missing from active VinuLatestEVM precompiles")
+	}
+	if _, ok := active[common.BytesToAddress([]byte{0x0b})]; !ok {
+		t.Fatal("BLS12_G1ADD missing from active VinuLatestEVM precompiles")
+	}
 }
 
 // EIP-152 test vectors

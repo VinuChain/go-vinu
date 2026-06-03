@@ -60,6 +60,7 @@ var (
 	londonInstructionSet           = newLondonInstructionSet()
 	shanghaiInstructionSet         = newShanghaiInstructionSet()
 	cancunInstructionSet           = newCancunInstructionSet()
+	vinuLatestEVMInstructionSet    = newVinuLatestEVMInstructionSet()
 )
 
 // JumpTable contains the EVM opcodes supported at a given fork.
@@ -91,6 +92,14 @@ func newCancunInstructionSet() JumpTable {
 	enable1153(&instructionSet) // EIP-1153: Transient storage opcodes
 	enable5656(&instructionSet) // EIP-5656: MCOPY instruction
 	// EIP-6780 SELFDESTRUCT behavior is gated by chain rules inside opSuicide.
+	return instructionSet
+}
+
+// newVinuLatestEVMInstructionSet returns the Cancun instructions plus Vinu's
+// explicitly selected latest-EVM opcode additions.
+func newVinuLatestEVMInstructionSet() JumpTable {
+	instructionSet := newCancunInstructionSet()
+	enable7939(&instructionSet) // EIP-7939: CLZ instruction
 	return instructionSet
 }
 

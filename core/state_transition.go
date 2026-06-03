@@ -229,6 +229,9 @@ func (st *StateTransition) buyGas() error {
 }
 
 func (st *StateTransition) preCheck() error {
+	if st.evm.ChainConfig().IsVinuLatestEVM(st.evm.Context.BlockNumber) && st.msg.Gas() > params.MaxTxGasLimit {
+		return ErrTxGasLimitExceeded
+	}
 	// Only check transactions that are not fake
 	if !st.msg.IsFake() {
 		// Make sure this transaction's nonce is correct.

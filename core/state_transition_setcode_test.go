@@ -44,6 +44,65 @@ func setCodeTestChainConfig(prague bool) *params.ChainConfig {
 	return &cfg
 }
 
+func vinuLatestEVMStateTestChainConfig(active bool) *params.ChainConfig {
+	cfg := *setCodeTestChainConfig(true)
+	cfg.VinuBLSBlock = common.Big0
+	if active {
+		cfg.VinuLatestEVMBlock = common.Big0
+	} else {
+		cfg.VinuLatestEVMBlock = nil
+	}
+	return &cfg
+}
+
+func TestTransitionDbRejectsTransactionAboveVinuLatestEVMGasCap(t *testing.T) {
+	sender := common.HexToAddress("0x1111")
+	receiver := common.HexToAddress("0x2222")
+	gasLimit := params.MaxTxGasLimit + 1
+
+	for _, tt := range []struct {
+		name      string
+		active    bool
+		wantError error
+	}{
+		{name: "pre-vinu-latest-evm", active: false},
+		{name: "vinu-latest-evm", active: true, wantError: ErrTxGasLimitExceeded},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			statedb, err := state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			statedb.SetBalance(sender, new(big.Int).SetUint64(gasLimit+params.TxGas))
+			evm := vm.NewEVM(vm.BlockContext{
+				CanTransfer: CanTransfer,
+				Transfer:    Transfer,
+				BlockNumber: big.NewInt(1),
+				BaseFee:     big.NewInt(0),
+				GasLimit:    gasLimit,
+			}, vm.TxContext{}, statedb, vinuLatestEVMStateTestChainConfig(tt.active), vm.Config{})
+			msg := types.NewMessage(
+				sender,
+				&receiver,
+				0,
+				big.NewInt(0),
+				gasLimit,
+				big.NewInt(1),
+				big.NewInt(1),
+				big.NewInt(1),
+				nil,
+				nil,
+				false,
+			)
+
+			_, err = ApplyMessage(evm, msg, new(GasPool).AddGas(gasLimit))
+			if !errors.Is(err, tt.wantError) {
+				t.Fatalf("ApplyMessage error = %v, want %v", err, tt.wantError)
+			}
+		})
+	}
+}
+
 func TestTransitionDbGatesDelegatedSenderByPrague(t *testing.T) {
 	const gasLimit = uint64(50_000)
 	sender := common.HexToAddress("0x1111")

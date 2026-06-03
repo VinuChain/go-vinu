@@ -343,6 +343,63 @@ func TestInvalidTransactions(t *testing.T) {
 	}
 }
 
+func TestTxPoolRejectsTransactionAboveVinuLatestEVMGasCap(t *testing.T) {
+	t.Parallel()
+
+	cfg := *params.TestChainConfig
+	cfg.HomesteadBlock = common.Big0
+	cfg.IstanbulBlock = common.Big0
+	cfg.BerlinBlock = common.Big0
+	cfg.LondonBlock = common.Big0
+	cfg.ShanghaiBlock = common.Big0
+	cfg.CancunBlock = common.Big0
+	cfg.PragueBlock = common.Big0
+	cfg.VinuBLSBlock = common.Big0
+	cfg.VinuLatestEVMBlock = common.Big0
+
+	statedb, _ := state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
+	blockchain := &testBlockChain{statedb, 30_000_000, new(event.Feed)}
+	key, _ := crypto.GenerateKey()
+	pool := NewTxPool(testTxPoolConfig, &cfg, blockchain)
+	defer pool.Stop()
+
+	if pool.currentMaxGas != params.MaxTxGasLimit {
+		t.Fatalf("currentMaxGas = %d, want VinuLatestEVM cap %d", pool.currentMaxGas, params.MaxTxGasLimit)
+	}
+	tx := transaction(0, params.MaxTxGasLimit+1, key)
+	if err := pool.AddRemote(tx); !errors.Is(err, ErrTxGasLimitExceeded) {
+		t.Fatalf("AddRemote error = %v, want %v", err, ErrTxGasLimitExceeded)
+	}
+}
+
+func TestTxPoolKeepsHighGasTransactionAllowedBeforeVinuLatestEVM(t *testing.T) {
+	t.Parallel()
+
+	cfg := *params.TestChainConfig
+	cfg.HomesteadBlock = common.Big0
+	cfg.IstanbulBlock = common.Big0
+	cfg.BerlinBlock = common.Big0
+	cfg.LondonBlock = common.Big0
+	cfg.ShanghaiBlock = common.Big0
+	cfg.CancunBlock = common.Big0
+	cfg.PragueBlock = common.Big0
+	cfg.VinuBLSBlock = common.Big0
+	cfg.VinuLatestEVMBlock = nil
+
+	statedb, _ := state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
+	blockchain := &testBlockChain{statedb, 30_000_000, new(event.Feed)}
+	key, _ := crypto.GenerateKey()
+	pool := NewTxPool(testTxPoolConfig, &cfg, blockchain)
+	defer pool.Stop()
+
+	tx := transaction(0, params.MaxTxGasLimit+1, key)
+	from, _ := deriveSender(tx)
+	testAddBalance(pool, from, new(big.Int).Mul(new(big.Int).SetUint64(30_000_000), big.NewInt(10)))
+	if err := pool.AddRemote(tx); err != nil {
+		t.Fatalf("pre-VinuLatestEVM AddRemote error = %v", err)
+	}
+}
+
 func TestTransactionPoolRejectsNonDelegationContractSender(t *testing.T) {
 	pool, key := setupTxPoolWithConfig(pragueTxPoolConfig())
 	defer pool.Stop()

@@ -26,6 +26,7 @@ import (
 )
 
 var activators = map[int]func(*JumpTable){
+	7939: enable7939,
 	5656: enable5656,
 	3860: enable3860,
 	3855: enable3855,
@@ -112,6 +113,16 @@ func opMcopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	length := scope.Stack.pop()
 	scope.Memory.Copy(dst.Uint64(), src.Uint64(), length.Uint64())
 	return nil, nil
+}
+
+// enable7939 applies EIP-7939 (CLZ opcode).
+func enable7939(jt *JumpTable) {
+	jt[CLZ] = &operation{
+		execute:     opCLZ,
+		constantGas: GasFastStep,
+		minStack:    minStack(1, 1),
+		maxStack:    maxStack(1, 1),
+	}
 }
 
 // EnableEIP enables the given EIP on the config.
