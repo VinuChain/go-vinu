@@ -30,6 +30,7 @@ import (
 	"testing"
 	"time"
 
+	bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/params"
 )
@@ -115,6 +116,98 @@ func TestPrecompiledP256Verify(t *testing.T) {
 	}
 }
 
+func TestPrecompiledP256VerifyDeterministicEdgeVectors(t *testing.T) {
+	input := deterministicP256VerifyInput(t)
+	p := &p256Verify{}
+	if gas := p.RequiredGas(input); gas != 6900 {
+		t.Fatalf("P256VERIFY gas = %d, want 6900", gas)
+	}
+	out, _, err := RunPrecompiledContract(p, input, 6900)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := common.LeftPadBytes([]byte{1}, 32); !bytes.Equal(out, want) {
+		t.Fatalf("P256VERIFY output = %x, want %x", out, want)
+	}
+
+	curve := elliptic.P256()
+	curveParams := curve.Params()
+	for _, tt := range []struct {
+		name   string
+		mutate func([]byte)
+	}{
+		{
+			name: "mutated digest",
+			mutate: func(in []byte) {
+				in[0] ^= 0x01
+			},
+		},
+		{
+			name: "zero r",
+			mutate: func(in []byte) {
+				clear(in[32:64])
+			},
+		},
+		{
+			name: "s equals curve order",
+			mutate: func(in []byte) {
+				curveParams.N.FillBytes(in[64:96])
+			},
+		},
+		{
+			name: "qx equals field modulus",
+			mutate: func(in []byte) {
+				curveParams.P.FillBytes(in[96:128])
+			},
+		},
+		{
+			name: "off curve public key",
+			mutate: func(in []byte) {
+				big.NewInt(1).FillBytes(in[96:128])
+				big.NewInt(1).FillBytes(in[128:160])
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			invalid := append([]byte(nil), input...)
+			tt.mutate(invalid)
+			out, _, err := RunPrecompiledContract(p, invalid, 6900)
+			if err != nil {
+				t.Fatalf("invalid P256VERIFY returned error: %v", err)
+			}
+			if len(out) != 0 {
+				t.Fatalf("invalid P256VERIFY output = %x, want empty", out)
+			}
+		})
+	}
+}
+
+func deterministicP256VerifyInput(t *testing.T) []byte {
+	t.Helper()
+	curve := elliptic.P256()
+	curveParams := curve.Params()
+	hash := sha256.Sum256([]byte("vinu deterministic p256 vector"))
+	qx, qy := curve.ScalarBaseMult([]byte{1})
+	rx, _ := curve.ScalarBaseMult([]byte{1})
+	r := new(big.Int).Mod(rx, curveParams.N)
+	s := new(big.Int).SetBytes(hash[:])
+	s.Add(s, r)
+	s.Mod(s, curveParams.N)
+	if r.Sign() == 0 || s.Sign() == 0 {
+		t.Fatal("deterministic P256 vector produced zero signature component")
+	}
+	if !ecdsa.Verify(&ecdsa.PublicKey{Curve: curve, X: qx, Y: qy}, hash[:], r, s) {
+		t.Fatal("deterministic P256 vector does not verify")
+	}
+	input := make([]byte, 160)
+	copy(input[0:32], hash[:])
+	r.FillBytes(input[32:64])
+	s.FillBytes(input[64:96])
+	qx.FillBytes(input[96:128])
+	qy.FillBytes(input[128:160])
+	return input
+}
+
 func TestPrecompiledP256VerifyRejectsMalformedInput(t *testing.T) {
 	p := &p256Verify{}
 	for _, input := range [][]byte{
@@ -131,6 +224,132 @@ func TestPrecompiledP256VerifyRejectsMalformedInput(t *testing.T) {
 			t.Fatalf("malformed P256VERIFY output = %x, want empty", out)
 		}
 	}
+}
+
+func TestVinuLatestEVMActualPrecompileAddressVectors(t *testing.T) {
+	_, _, g1, g2 := bls12381.Generators()
+	g1Two := new(bls12381.G1Affine).ScalarMultiplicationBase(big.NewInt(2))
+	g1Three := new(bls12381.G1Affine).ScalarMultiplicationBase(big.NewInt(3))
+	g1Five := new(bls12381.G1Affine).ScalarMultiplicationBase(big.NewInt(5))
+	g2Two := new(bls12381.G2Affine).ScalarMultiplicationBase(big.NewInt(2))
+	g2Three := new(bls12381.G2Affine).ScalarMultiplicationBase(big.NewInt(3))
+	g2Five := new(bls12381.G2Affine).ScalarMultiplicationBase(big.NewInt(5))
+
+	run := func(name string, addr common.Address, input []byte, want []byte, wantGas uint64) {
+		t.Helper()
+		t.Run(name, func(t *testing.T) {
+			p, ok := PrecompiledContractsVinuLatestEVM[addr]
+			if !ok {
+				t.Fatalf("missing VinuLatestEVM precompile %s", addr)
+			}
+			if gas := p.RequiredGas(input); gas != wantGas {
+				t.Fatalf("%s gas = %d, want %d", name, gas, wantGas)
+			}
+			out, remaining, err := RunPrecompiledContract(p, input, wantGas)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if remaining != 0 {
+				t.Fatalf("%s remaining gas = %d, want 0", name, remaining)
+			}
+			if !bytes.Equal(out, want) {
+				t.Fatalf("%s output = %x, want %x", name, out, want)
+			}
+		})
+	}
+
+	g1AddInput := append(encodePointG1(g1Two), encodePointG1(g1Three)...)
+	run("BLS12_G1ADD", common.BytesToAddress([]byte{0x0b}), g1AddInput, encodePointG1(g1Five), params.Bls12381G1AddGas)
+
+	g1MSMInput := append(encodePointG1(&g1), common.LeftPadBytes([]byte{2}, 32)...)
+	g1MSMInput = append(g1MSMInput, encodePointG1(&g1)...)
+	g1MSMInput = append(g1MSMInput, common.LeftPadBytes([]byte{3}, 32)...)
+	run("BLS12_G1MSM", common.BytesToAddress([]byte{0x0c}), g1MSMInput, encodePointG1(g1Five), 22776)
+
+	g2AddInput := append(encodePointG2(g2Two), encodePointG2(g2Three)...)
+	run("BLS12_G2ADD", common.BytesToAddress([]byte{0x0d}), g2AddInput, encodePointG2(g2Five), params.Bls12381G2AddGas)
+
+	g2MSMInput := append(encodePointG2(&g2), common.LeftPadBytes([]byte{2}, 32)...)
+	g2MSMInput = append(g2MSMInput, encodePointG2(&g2)...)
+	g2MSMInput = append(g2MSMInput, common.LeftPadBytes([]byte{3}, 32)...)
+	run("BLS12_G2MSM", common.BytesToAddress([]byte{0x0e}), g2MSMInput, encodePointG2(g2Five), 45000)
+
+	negG1 := new(bls12381.G1Affine).Neg(&g1)
+	pairingInput := append(encodePointG1(&g1), encodePointG2(&g2)...)
+	pairingInput = append(pairingInput, encodePointG1(negG1)...)
+	pairingInput = append(pairingInput, encodePointG2(&g2)...)
+	run("BLS12_PAIRING_CHECK", common.BytesToAddress([]byte{0x0f}), pairingInput, common.LeftPadBytes([]byte{1}, 32), params.Bls12381PairingBaseGas+2*params.Bls12381PairingPerPairGas)
+
+	run("BLS12_MAP_FP_TO_G1", common.BytesToAddress([]byte{0x10}), make([]byte, 64), mustMapToG1(t, make([]byte, 64)), params.Bls12381MapG1Gas)
+	run("BLS12_MAP_FP2_TO_G2", common.BytesToAddress([]byte{0x11}), make([]byte, 128), mustMapToG2(t, make([]byte, 128)), params.Bls12381MapG2Gas)
+
+	p256Input := deterministicP256VerifyInput(t)
+	run("P256VERIFY", common.BytesToAddress([]byte{0x01, 0x00}), p256Input, common.LeftPadBytes([]byte{1}, 32), 6900)
+}
+
+func mustMapToG1(t *testing.T, input []byte) []byte {
+	t.Helper()
+	out, err := (&bls12381MapG1{}).Run(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := decodePointG1(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.IsInSubGroup() {
+		t.Fatal("BLS12_MAP_FP_TO_G1 output is not in subgroup")
+	}
+	return out
+}
+
+func mustMapToG2(t *testing.T, input []byte) []byte {
+	t.Helper()
+	out, err := (&bls12381MapG2{}).Run(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := decodePointG2(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.IsInSubGroup() {
+		t.Fatal("BLS12_MAP_FP2_TO_G2 output is not in subgroup")
+	}
+	return out
+}
+
+func TestVinuLatestEVMActualBLSPrecompileMalformedInputs(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		addr common.Address
+		in   []byte
+		err  error
+	}{
+		{name: "G1ADD short", addr: common.BytesToAddress([]byte{0x0b}), in: make([]byte, 255), err: errBLS12381InvalidInputLength},
+		{name: "G1MSM short", addr: common.BytesToAddress([]byte{0x0c}), in: make([]byte, 159), err: errBLS12381InvalidInputLength},
+		{name: "G2ADD short", addr: common.BytesToAddress([]byte{0x0d}), in: make([]byte, 511), err: errBLS12381InvalidInputLength},
+		{name: "G2MSM short", addr: common.BytesToAddress([]byte{0x0e}), in: make([]byte, 287), err: errBLS12381InvalidInputLength},
+		{name: "pairing short", addr: common.BytesToAddress([]byte{0x0f}), in: make([]byte, 383), err: errBLS12381InvalidInputLength},
+		{name: "map G1 short", addr: common.BytesToAddress([]byte{0x10}), in: make([]byte, 63), err: errBLS12381InvalidInputLength},
+		{name: "map G2 short", addr: common.BytesToAddress([]byte{0x11}), in: make([]byte, 127), err: errBLS12381InvalidInputLength},
+		{name: "map G1 top bytes", addr: common.BytesToAddress([]byte{0x10}), in: leadingNonZeroBytes(64), err: errBLS12381InvalidFieldElementTopBytes},
+		{name: "map G2 top bytes", addr: common.BytesToAddress([]byte{0x11}), in: leadingNonZeroBytes(128), err: errBLS12381InvalidFieldElementTopBytes},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			p := PrecompiledContractsVinuLatestEVM[tt.addr]
+			_, _, err := RunPrecompiledContract(p, tt.in, p.RequiredGas(tt.in))
+			if err != tt.err {
+				t.Fatalf("error = %v, want %v", err, tt.err)
+			}
+		})
+	}
+}
+
+func leadingNonZeroBytes(size int) []byte {
+	out := make([]byte, size)
+	out[0] = 1
+	return out
 }
 
 func TestPrecompiledModExpVinuLatestEVMGasAndBounds(t *testing.T) {
@@ -169,6 +388,132 @@ func TestPrecompiledModExpVinuLatestEVMGasAndBounds(t *testing.T) {
 	if err != errModExpInputTooLarge {
 		t.Fatalf("oversized MODEXP error = %v, want %v", err, errModExpInputTooLarge)
 	}
+}
+
+func TestPrecompiledModExpVinuLatestEVMBoundaryVectors(t *testing.T) {
+	latest := &bigModExp{eip2565: true, eip7823: true, eip7883: true}
+	for _, tt := range []struct {
+		name             string
+		baseLen, expLen  int
+		modLen           int
+		base, exp, mod   *big.Int
+		wantGas          uint64
+		wantResultLength int
+	}{
+		{
+			name:             "zero base and modulus length returns empty",
+			baseLen:          0,
+			expLen:           0,
+			modLen:           0,
+			base:             big.NewInt(0),
+			exp:              big.NewInt(0),
+			mod:              big.NewInt(0),
+			wantGas:          500,
+			wantResultLength: 0,
+		},
+		{
+			name:             "one hundred twenty eight byte operands exceed minimum gas",
+			baseLen:          128,
+			expLen:           1,
+			modLen:           128,
+			base:             big.NewInt(2),
+			exp:              big.NewInt(1),
+			mod:              big.NewInt(17),
+			wantGas:          512,
+			wantResultLength: 128,
+		},
+		{
+			name:             "thirty three byte exponent uses sixteen bit adjustment",
+			baseLen:          32,
+			expLen:           33,
+			modLen:           32,
+			base:             big.NewInt(2),
+			exp:              new(big.Int).Lsh(big.NewInt(1), 263),
+			mod:              big.NewInt(17),
+			wantGas:          4336,
+			wantResultLength: 32,
+		},
+		{
+			name:             "one thousand twenty four byte operands are accepted",
+			baseLen:          1024,
+			expLen:           0,
+			modLen:           1024,
+			base:             big.NewInt(2),
+			exp:              big.NewInt(0),
+			mod:              big.NewInt(17),
+			wantGas:          32768,
+			wantResultLength: 1024,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			input := makeModExpInput(tt.baseLen, tt.expLen, tt.modLen, tt.base, tt.exp, tt.mod)
+			if gas := latest.RequiredGas(input); gas != tt.wantGas {
+				t.Fatalf("MODEXP gas = %d, want %d", gas, tt.wantGas)
+			}
+			out, remaining, err := RunPrecompiledContract(latest, input, tt.wantGas)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if remaining != 0 {
+				t.Fatalf("remaining gas = %d, want 0", remaining)
+			}
+			if len(out) != tt.wantResultLength {
+				t.Fatalf("MODEXP output length = %d, want %d", len(out), tt.wantResultLength)
+			}
+			want := modExpExpected(tt.modLen, tt.base, tt.exp, tt.mod)
+			if !bytes.Equal(out, want) {
+				t.Fatalf("MODEXP output = %x, want %x", out, want)
+			}
+		})
+	}
+}
+
+func TestPrecompiledModExpVinuLatestEVMRejectsEachOversizedOperand(t *testing.T) {
+	latest := &bigModExp{eip2565: true, eip7823: true, eip7883: true}
+	for _, tt := range []struct {
+		name           string
+		base, exp, mod int
+	}{
+		{name: "base length", base: 1025, exp: 1, mod: 1},
+		{name: "exponent length", base: 1, exp: 1025, mod: 1},
+		{name: "modulus length", base: 1, exp: 1, mod: 1025},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			input := makeModExpInput(tt.base, tt.exp, tt.mod, big.NewInt(1), big.NewInt(1), big.NewInt(1))
+			if gas := latest.RequiredGas(input); gas != math.MaxUint64 {
+				t.Fatalf("oversized MODEXP gas = %d, want MaxUint64", gas)
+			}
+			_, _, err := RunPrecompiledContract(latest, input, math.MaxUint64)
+			if err != errModExpInputTooLarge {
+				t.Fatalf("oversized MODEXP error = %v, want %v", err, errModExpInputTooLarge)
+			}
+		})
+	}
+}
+
+func makeModExpInput(baseLen, expLen, modLen int, base, exp, mod *big.Int) []byte {
+	input := make([]byte, 96+baseLen+expLen+modLen)
+	big.NewInt(int64(baseLen)).FillBytes(input[0:32])
+	big.NewInt(int64(expLen)).FillBytes(input[32:64])
+	big.NewInt(int64(modLen)).FillBytes(input[64:96])
+	fillBigIntBytes(input[96:96+baseLen], base)
+	fillBigIntBytes(input[96+baseLen:96+baseLen+expLen], exp)
+	fillBigIntBytes(input[96+baseLen+expLen:], mod)
+	return input
+}
+
+func fillBigIntBytes(dst []byte, n *big.Int) {
+	if len(dst) == 0 || n == nil {
+		return
+	}
+	n.FillBytes(dst)
+}
+
+func modExpExpected(modLen int, base, exp, mod *big.Int) []byte {
+	if mod.Sign() == 0 {
+		return make([]byte, modLen)
+	}
+	return common.LeftPadBytes(new(big.Int).Exp(base, exp, mod).Bytes(), modLen)
 }
 
 func TestVinuLatestEVMActivePrecompiles(t *testing.T) {

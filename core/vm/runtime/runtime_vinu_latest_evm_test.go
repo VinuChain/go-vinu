@@ -60,7 +60,10 @@ func TestVinuLatestEVMCLZValues(t *testing.T) {
 		want  byte
 	}{
 		{name: "high bit", value: common.FromHex("0x8000000000000000000000000000000000000000000000000000000000000000"), want: 0},
+		{name: "all bits", value: common.FromHex("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"), want: 0},
 		{name: "second bit", value: common.FromHex("0x4000000000000000000000000000000000000000000000000000000000000000"), want: 1},
+		{name: "byte boundary", value: common.FromHex("0x0100000000000000000000000000000000000000000000000000000000000000"), want: 7},
+		{name: "low byte high bit", value: common.LeftPadBytes([]byte{0x80}, 32), want: 248},
 		{name: "one", value: common.LeftPadBytes([]byte{1}, 32), want: 255},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
