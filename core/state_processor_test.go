@@ -17,6 +17,7 @@
 package core
 
 import (
+	"errors"
 	"math/big"
 	"testing"
 
@@ -283,6 +284,58 @@ func TestStateProcessorErrors(t *testing.T) {
 				t.Errorf("test %d:\nhave \"%v\"\nwant \"%v\"\n", i, have, want)
 			}
 		}
+	}
+}
+
+func TestStateProcessorRejectsOverCapTransactionInBlock(t *testing.T) {
+	config := &params.ChainConfig{
+		ChainID:             big.NewInt(1),
+		HomesteadBlock:      big.NewInt(0),
+		EIP150Block:         big.NewInt(0),
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         big.NewInt(0),
+		ShanghaiBlock:       big.NewInt(0),
+		CancunBlock:         big.NewInt(0),
+		PragueBlock:         big.NewInt(0),
+		VinuBLSBlock:        big.NewInt(0),
+		VinuLatestEVMBlock:  big.NewInt(1),
+		Ethash:              new(params.EthashConfig),
+	}
+	testKey, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	sender := crypto.PubkeyToAddress(testKey.PublicKey)
+	tx, err := types.SignTx(
+		types.NewTransaction(0, common.Address{}, big.NewInt(0), params.MaxTxGasLimit+1, big.NewInt(1), nil),
+		types.LatestSigner(config),
+		testKey,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	db := rawdb.NewMemoryDatabase()
+	gspec := &Genesis{
+		Config:   config,
+		GasLimit: params.MaxTxGasLimit + 1,
+		Alloc: GenesisAlloc{
+			sender: GenesisAccount{
+				Balance: new(big.Int).SetUint64(params.MaxTxGasLimit + params.TxGas),
+			},
+		},
+	}
+	genesis := gspec.MustCommit(db)
+	blockchain, _ := NewBlockChain(db, nil, config, ethash.NewFaker(), vm.Config{}, nil, nil)
+	defer blockchain.Stop()
+
+	block := GenerateBadBlock(genesis, ethash.NewFaker(), types.Transactions{tx}, config)
+	_, err = blockchain.InsertChain(types.Blocks{block})
+	if !errors.Is(err, ErrTxGasLimitExceeded) {
+		t.Fatalf("InsertChain error = %v, want %v", err, ErrTxGasLimitExceeded)
 	}
 }
 
