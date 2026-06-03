@@ -18,6 +18,7 @@ package light
 
 import (
 	"context"
+	"errors"
 	"math"
 	"math/big"
 	"testing"
@@ -34,6 +35,56 @@ import (
 
 type testTxRelay struct {
 	send, discard, mined chan int
+}
+
+func TestTxPoolRejectsTransactionAboveVinuLatestEVMGasCap(t *testing.T) {
+	cfg := *params.TestChainConfig
+	cfg.BerlinBlock = common.Big0
+	cfg.LondonBlock = common.Big0
+	cfg.ShanghaiBlock = common.Big0
+	cfg.CancunBlock = common.Big0
+	cfg.PragueBlock = common.Big0
+	cfg.VinuBLSBlock = common.Big0
+	cfg.VinuLatestEVMBlock = common.Big0
+
+	var (
+		sdb   = rawdb.NewMemoryDatabase()
+		ldb   = rawdb.NewMemoryDatabase()
+		gspec = core.Genesis{
+			Config:   &cfg,
+			Alloc:    core.GenesisAlloc{testBankAddress: {Balance: testBankFunds}},
+			GasLimit: params.MaxTxGasLimit + 1,
+			BaseFee:  big.NewInt(params.InitialBaseFee),
+		}
+	)
+	gspec.MustCommit(sdb)
+	gspec.MustCommit(ldb)
+
+	odr := &testOdr{sdb: sdb, ldb: ldb, indexerConfig: TestClientIndexerConfig}
+	relay := &testTxRelay{
+		send:    make(chan int, 1),
+		discard: make(chan int, 1),
+		mined:   make(chan int, 1),
+	}
+	lightchain, err := NewLightChain(odr, &cfg, ethash.NewFullFaker(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := NewTxPool(&cfg, lightchain, relay)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	tx, err := types.SignTx(
+		types.NewTransaction(0, acc1Addr, big.NewInt(0), params.MaxTxGasLimit+1, big.NewInt(params.InitialBaseFee), nil),
+		types.LatestSigner(&cfg),
+		testBankKey,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.Add(ctx, tx); !errors.Is(err, core.ErrTxGasLimitExceeded) {
+		t.Fatalf("Add error = %v, want %v", err, core.ErrTxGasLimitExceeded)
+	}
 }
 
 func (self *testTxRelay) Send(txs types.Transactions) {

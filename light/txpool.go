@@ -67,10 +67,11 @@ type TxPool struct {
 	mined        map[common.Hash][]*types.Transaction // mined transactions by block hash
 	clearIdx     uint64                               // earliest block nr that can contain mined tx info
 
-	istanbul bool // Fork indicator whether we are in the istanbul stage.
-	eip2718  bool // Fork indicator whether we are in the eip2718 stage.
-	shanghai bool // Fork indicator whether Shanghai transaction validation is active.
-	prague   bool // Fork indicator whether Prague/EIP-7702 transaction validation is active.
+	istanbul      bool // Fork indicator whether we are in the istanbul stage.
+	eip2718       bool // Fork indicator whether we are in the eip2718 stage.
+	shanghai      bool // Fork indicator whether Shanghai transaction validation is active.
+	prague        bool // Fork indicator whether Prague/EIP-7702 transaction validation is active.
+	vinuLatestEVM bool // Fork indicator whether VinuLatestEVM transaction caps are active.
 }
 
 // TxRelayBackend provides an interface to the mechanism that forwards transacions
@@ -96,23 +97,24 @@ func NewTxPool(config *params.ChainConfig, chain *LightChain, relay TxRelayBacke
 	head := chain.CurrentHeader()
 	next := new(big.Int).Add(head.Number, big.NewInt(1))
 	pool := &TxPool{
-		config:      config,
-		signer:      types.LatestSigner(config),
-		nonce:       make(map[common.Address]uint64),
-		pending:     make(map[common.Hash]*types.Transaction),
-		mined:       make(map[common.Hash][]*types.Transaction),
-		quit:        make(chan bool),
-		chainHeadCh: make(chan core.ChainHeadEvent, chainHeadChanSize),
-		chain:       chain,
-		relay:       relay,
-		odr:         chain.Odr(),
-		chainDb:     chain.Odr().Database(),
-		head:        head.Hash(),
-		clearIdx:    head.Number.Uint64(),
-		istanbul:    config.IsIstanbul(next),
-		eip2718:     config.IsBerlin(next),
-		shanghai:    config.IsShanghai(next),
-		prague:      config.IsPrague(next),
+		config:        config,
+		signer:        types.LatestSigner(config),
+		nonce:         make(map[common.Address]uint64),
+		pending:       make(map[common.Hash]*types.Transaction),
+		mined:         make(map[common.Hash][]*types.Transaction),
+		quit:          make(chan bool),
+		chainHeadCh:   make(chan core.ChainHeadEvent, chainHeadChanSize),
+		chain:         chain,
+		relay:         relay,
+		odr:           chain.Odr(),
+		chainDb:       chain.Odr().Database(),
+		head:          head.Hash(),
+		clearIdx:      head.Number.Uint64(),
+		istanbul:      config.IsIstanbul(next),
+		eip2718:       config.IsBerlin(next),
+		shanghai:      config.IsShanghai(next),
+		prague:        config.IsPrague(next),
+		vinuLatestEVM: config.IsVinuLatestEVM(next),
 	}
 	// Subscribe events from blockchain
 	pool.chainHeadSub = pool.chain.SubscribeChainHeadEvent(pool.chainHeadCh)
@@ -328,6 +330,7 @@ func (pool *TxPool) setNewHead(head *types.Header) {
 	pool.eip2718 = pool.config.IsBerlin(next)
 	pool.shanghai = pool.config.IsShanghai(next)
 	pool.prague = pool.config.IsPrague(next)
+	pool.vinuLatestEVM = pool.config.IsVinuLatestEVM(next)
 }
 
 // Stop stops the light transaction pool
@@ -405,6 +408,9 @@ func (pool *TxPool) validateTx(ctx context.Context, tx *types.Transaction) error
 	// Check the transaction doesn't exceed the current
 	// block limit gas.
 	header := pool.chain.GetHeaderByHash(pool.head)
+	if pool.vinuLatestEVM && tx.Gas() > params.MaxTxGasLimit {
+		return core.ErrTxGasLimitExceeded
+	}
 	if header.GasLimit < tx.Gas() {
 		return core.ErrGasLimit
 	}
