@@ -231,9 +231,17 @@ func (r *Receipt) setFromRLP(data receiptRLP) error {
 	if data.FeeRefund != nil && data.FeeRefund.BitLen() > 256 {
 		return errors.New("receipt FeeRefund exceeds 32 bytes")
 	}
-	// Discard nonzero FeeRefund received before Podgorica activation.
+	// Invariant: FeeRefund is never nil after a successful decode. When
+	// FeeRefundActive is true the peer-supplied value is accepted; when false
+	// any peer value is discarded and normalized to zero (pre-Podgorica
+	// determinism). This matches the storage-decode paths, which all set a
+	// concrete zero, removing the prior nil-vs-zero asymmetry (audit L1/T10).
+	// Re-encoding is unaffected: feeRefundForEncoding maps both nil and zero to
+	// the same wire bytes, so this is consensus-behavior-preserving.
 	if FeeRefundActive.Load() {
 		r.FeeRefund = safeFeeRefund(data.FeeRefund)
+	} else {
+		r.FeeRefund = new(big.Int)
 	}
 	return r.setStatus(data.PostStateOrStatus)
 }

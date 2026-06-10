@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/rlp"
 )
 
 // This file characterizes the consensus-critical receipt-ROOT derivation path
@@ -209,6 +210,44 @@ func TestReceiptRoot_ConcurrentFlagFlipObservesWrongEpoch(t *testing.T) {
 		"(clean epochs are pre=%x post=%x); a torn root proves the global "+
 		"flag is NOT block-epoch-safe under concurrent derivation",
 		len(observed), preRoot, postRoot)
+}
+
+// --- Decode nil-vs-zero invariant (audit L1 / T10) ------------------------
+
+// TestDecode_FeeRefundNeverNil pins the normalized invariant: after a
+// successful consensus decode, Receipt.FeeRefund is never nil, regardless of
+// the flag state or the wire value. This matches the storage-decode paths and
+// removes the prior asymmetry where a pre-Podgorica decode left FeeRefund nil.
+func TestDecode_FeeRefundNeverNil(t *testing.T) {
+	saveAndRestoreFeeRefundActive(t)
+
+	cases := []struct {
+		name   string
+		active bool
+		wire   *big.Int
+	}{
+		{"active_false_nil_wire", false, nil},
+		{"active_false_nonzero_wire", false, big.NewInt(123)},
+		{"active_true_nil_wire", true, nil},
+		{"active_true_nonzero_wire", true, big.NewInt(123)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			FeeRefundActive.Store(tc.active)
+			wire := encodeReceiptBypassingFlag(t, tc.wire)
+			var decoded Receipt
+			if err := rlp.DecodeBytes(wire, &decoded); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if decoded.FeeRefund == nil {
+				t.Fatal("invariant violated: FeeRefund must be non-nil after decode")
+			}
+			if !tc.active && decoded.FeeRefund.Sign() != 0 {
+				t.Fatalf("pre-Podgorica decode must normalize to zero; got %s",
+					decoded.FeeRefund)
+			}
+		})
+	}
 }
 
 // TestReceiptRoot_NoConcurrentFlip_IsSafe is the positive counterpart: with the
