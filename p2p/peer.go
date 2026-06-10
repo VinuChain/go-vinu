@@ -112,6 +112,7 @@ type Peer struct {
 	wg       sync.WaitGroup
 	protoErr chan error
 	closed   chan struct{}
+	pingRecv chan struct{}
 	disc     chan DiscReason
 
 	// events receives message send / receive events if set
@@ -225,6 +226,7 @@ func newPeer(log log.Logger, conn *conn, protocols []Protocol) *Peer {
 		disc:     make(chan DiscReason),
 		protoErr: make(chan error, len(protomap)+1), // protocols + pingLoop
 		closed:   make(chan struct{}),
+		pingRecv: make(chan struct{}, 16),
 		log:      log.New("id", conn.node.ID(), "conn", conn.flags),
 	}
 	return p
@@ -290,6 +292,10 @@ func (p *Peer) pingLoop() {
 	defer ping.Stop()
 	for {
 		select {
+		case <-p.pingRecv:
+			// Respond to an inbound ping. Sending here, in the single pingLoop
+			// goroutine, bounds the work a ping flood can induce.
+			SendItems(p.rw, pongMsg)
 		case <-ping.C:
 			if err := SendItems(p.rw, pingMsg); err != nil {
 				p.protoErr <- err
@@ -322,7 +328,14 @@ func (p *Peer) handle(msg Msg) error {
 	switch {
 	case msg.Code == pingMsg:
 		msg.Discard()
-		go SendItems(p.rw, pongMsg)
+		// Signal the pingLoop goroutine to send a pong response. Routing this
+		// through the existing pingLoop (rather than spawning a goroutine per
+		// ping) bounds resource usage under a ping flood.
+		// Upstream cherry-pick: ethereum/go-ethereum#27887 (CVE-2023-40591).
+		select {
+		case p.pingRecv <- struct{}{}:
+		case <-p.closed:
+		}
 	case msg.Code == discMsg:
 		var reason [1]DiscReason
 		// This is the last message. We don't need to discard or

@@ -179,6 +179,38 @@ func TestPeerPing(t *testing.T) {
 	}
 }
 
+// TestPeerPingFlood is a regression test for the CVE-2023-40591 cherry-pick
+// (ethereum/go-ethereum#27887). Inbound pings are answered by the single
+// pingLoop goroutine via the buffered pingRecv channel, instead of spawning a
+// goroutine per ping. This test sends a burst of pings, draining the pongs in
+// lockstep so the bounded pingRecv buffer cannot stall, and asserts each ping
+// is answered with exactly one pong.
+func TestPeerPingFlood(t *testing.T) {
+	closer, rw, _, _ := testPeer(nil)
+	defer closer()
+
+	const pings = 64
+	errc := make(chan error, 1)
+	go func() {
+		for i := 0; i < pings; i++ {
+			if err := SendItems(rw, pingMsg); err != nil {
+				errc <- err
+				return
+			}
+		}
+		errc <- nil
+	}()
+
+	for i := 0; i < pings; i++ {
+		if err := ExpectMsg(rw, pongMsg, nil); err != nil {
+			t.Fatalf("ping %d: %v", i, err)
+		}
+	}
+	if err := <-errc; err != nil {
+		t.Fatalf("sending pings: %v", err)
+	}
+}
+
 // This test checks that a disconnect message sent by a peer is returned
 // as the error from Peer.run.
 func TestPeerDisconnect(t *testing.T) {
