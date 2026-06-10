@@ -76,6 +76,13 @@ jobs:
         # core/types carries the FeeRefundActive atomic flag (audit H1); rpc
         # carries the batch/concurrency limiter. These are the places where a
         # data race would be consensus- or DoS-relevant.
+        #
+        # Known-flaky under load (fork-inherited geth-era timing tests, NOT
+        # consensus issues): rpc/TestClientNotificationStorm and some core/
+        # blockchain/txpool tests occasionally fail under -race on a busy
+        # runner. They pass on isolated re-run. If one trips the job, re-run;
+        # do not treat a single -race failure in those as a real regression
+        # without reproducing it in isolation first.
         run: |
           go test -race \
             ./core/types/... \
