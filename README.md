@@ -5,7 +5,7 @@ VinuChain's fork of [go-ethereum](https://github.com/ethereum/go-ethereum), prov
 The Go module path remains `github.com/ethereum/go-ethereum` for compatibility with the upstream import graph. VinuChain's `go.mod` consumes this fork via a `replace` directive:
 
 ```
-replace github.com/ethereum/go-ethereum => github.com/VinuChain/go-vinu v1.20.8-quota
+replace github.com/ethereum/go-ethereum => github.com/VinuChain/go-vinu v1.20.24-quota
 ```
 
 ## Why the fork?
@@ -20,6 +20,27 @@ VinuChain's fee refund mechanism returns a portion of transaction fees to eligib
 - **RLP encoding** — FeeRefund is included in receipt RLP serialization with defensive nil handling
 - **JSON marshaling** — FeeRefund appears in `eth_getTransactionReceipt` RPC responses
 - **GraphQL** — `feeRefund` field added to the Transaction schema
+
+> The consensus inclusion of `FeeRefund` is gated by the process-global
+> `FeeRefundActive` flag (activated at the Podgorica fork). See
+> [FORK.md](FORK.md) §2.2 and [SECURITY-TRIAGE.md](SECURITY-TRIAGE.md) for the
+> safety contract (set-once-before-start, never-flip).
+
+### EVM hard-fork backports
+
+Shanghai, a Cancun **subset**, and Prague EVM features have been backported and
+gated behind VinuChain-specific fork switches (`VinuBLSBlock`,
+`VinuLatestEVMBlock` in `params.ChainConfig`):
+
+- **Shanghai:** PUSH0 (EIP-3855), warm coinbase (EIP-3651), initcode limits (EIP-3860).
+- **Cancun (subset):** transient storage TLOAD/TSTORE (EIP-1153), MCOPY (EIP-5656),
+  SELFDESTRUCT-only-same-tx (EIP-6780). **Not included:** BLOBHASH/BLOBBASEFEE,
+  blob transactions (EIP-4844), and the beacon-root contract (EIP-4788); blob txs
+  are explicitly rejected in the pool.
+- **Prague:** set-code transactions (EIP-7702), per-tx gas cap (EIP-7825),
+  BLS12-381 (EIP-2537) and P256 precompiles.
+
+See [FORK.md](FORK.md) for the full delta and upstream-tracking policy.
 
 ### Security hardening (audit fixes)
 
@@ -38,28 +59,53 @@ VinuChain's fee refund mechanism returns a portion of transaction fees to eligib
 
 ## What is NOT changed
 
-This fork preserves the full go-ethereum API surface. All standard Ethereum JSON-RPC methods, EVM opcodes, P2P protocols, account management, and developer tools work identically to upstream go-ethereum. The fork only adds VinuChain-specific extensions.
+This fork preserves most of the go-ethereum API surface; standard JSON-RPC
+methods, account management, and developer tools are largely unchanged. The EVM,
+however, is **not** identical to upstream:
+
+- The Cancun support is a **subset** — `BLOBHASH`/`BLOBBASEFEE` and EIP-4844 blob
+  transactions are **not** implemented (blob txs are rejected). Contracts compiled
+  with `evm_version = cancun` that use those opcodes will hit invalid opcodes.
+- EIP-6780 "created in this transaction" tracking is broader than upstream (see
+  [FORK.md](FORK.md) §2.3); this is a documented semantic divergence.
+
+The p2p/sync layers are inherited unmodified from the geth v1.10.8 base; see
+[SECURITY-TRIAGE.md](SECURITY-TRIAGE.md) for the post-1.10.8 CVE dispositions.
 
 ## Building
 
 ```shell
-make geth
+make geth        # builds ./build/bin/geth via `go build`
+# or directly:
+go build ./...
 ```
 
-Requires Go 1.25+ and a C compiler. The build output is `build/bin/geth`, though VinuChain nodes use this as a library — not as a standalone binary.
+Requires Go 1.25+ (see `go.mod`) and a C compiler. The build output is
+`build/bin/geth`, though VinuChain nodes consume this as a **library**, not as a
+standalone binary. (The historical `build/ci.go` helper was removed; the Makefile
+now uses plain `go build`/`go test`/`go vet`.)
 
 ## Testing
 
 ```shell
-go test ./...
+make test-fork   # CI-gated fork/consensus packages (recommended)
+make test        # full module suite (some upstream-inherited packages may fail)
 ```
+
+CI runs `make`-equivalent build + vet + the fork-touched test packages on every
+push and pull request — see [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 ## Versioning
 
-Tags follow the pattern `v1.20.X-quota` to indicate the VinuChain quota/payback feature branch:
+Tags follow the pattern `v1.20.X-quota` to indicate the VinuChain quota/payback feature branch. The current tip is **`v1.20.24-quota`**; run `git tag | grep quota` for the full list and see [FORK.md](FORK.md) for the delta.
+
+> **Branch caveat:** the live fork delta is on branch `elemont`. The GitHub
+> default branch `master` is an ancient geth-1.9.6-era snapshot and does not
+> reflect production code — build, audit, and integrate against `elemont`.
 
 | Tag | Description |
 |-----|-------------|
+| `v1.20.9-quota` → `v1.20.24-quota` | 2026 hardening + EVM-backport campaign: Shanghai/Cancun-subset/Prague behind VinuBLS/VinuLatestEVM switches, RPC/crypto hardening, CI (see [FORK.md](FORK.md)) |
 | `v1.20.8-quota` | Remove docker/docker CVE dependency, Go 1.25.8, full dep alignment |
 | `v1.20.7-quota` | Dependency alignment: Go 1.25.8, golang.org/x/*, protobuf |
 | `v1.20.6-quota` | Audit hardening, btcec v2, Go 1.24.1 |

@@ -21,10 +21,15 @@ import (
 )
 
 var (
-	VersionMajor = 1        // Major version component of the current release
-	VersionMinor = 10       // Minor version component of the current release
-	VersionPatch = 8        // Patch version component of the current release
-	VersionMeta  = "stable" // Version metadata to append to the version string
+	VersionMajor = 1  // Major version component of the geth base release
+	VersionMinor = 10 // Minor version component of the geth base release
+	VersionPatch = 8  // Patch version component of the geth base release
+	// VersionMeta makes web3_clientVersion / archive names VinuChain-identifiable.
+	// The numeric components above track the geth base (v1.10.8); this metadata
+	// tracks the VinuChain release tag. It is a display string only — it is not
+	// parsed for any consensus or protocol decision. Keep in sync with the
+	// release tag (see README "Versioning").
+	VersionMeta = "vinu-v1.20.24-quota"
 )
 
 // Version holds the textual version string.
