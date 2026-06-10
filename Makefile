@@ -14,6 +14,7 @@
 GOBIN = ./build/bin
 
 geth:
+	@mkdir -p $(GOBIN)
 	go build -o $(GOBIN)/geth ./cmd/geth
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/geth\" to launch geth."
