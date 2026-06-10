@@ -1,0 +1,84 @@
+name: CI
+
+# Continuous integration for the go-vinu fork.
+#
+# Rationale (see audit report 02-go-vinu.md, finding H3): this is a
+# consensus-critical EVM/state/types library with ~3.2k lines of fork tests
+# that previously never ran in CI. This workflow turns those tests into a real
+# safety net: every push and pull request runs build + vet + the fork-touched
+# test packages, plus the race detector on the most concurrency-sensitive ones.
+#
+# Scope decision: we deliberately do NOT run the full upstream `go test ./...`
+# matrix. The VinuChain node repo is the integration harness; here we gate the
+# packages that carry the fork delta and are known-green on Go 1.25.x. The list
+# in `test` / `race` below is the documented allow-list. If an upstream-inherited
+# package is added later and is found to be broken, scope it out here with a
+# comment rather than letting red become normal.
+
+on:
+  push:
+    branches: [elemont, audit-impl]
+  pull_request:
+
+# go.mod pins the toolchain; keep this in sync with it.
+env:
+  GO_VERSION: "1.25.8"
+
+jobs:
+  build:
+    name: build + vet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          # No actions/cache: the audit brief forbids it and the toolchain
+          # download dominates anyway.
+          cache: false
+      - name: go build ./...
+        run: go build ./...
+      - name: go vet (fork-touched packages)
+        run: go vet ./core/... ./rpc/... ./internal/ethapi/... ./crypto/...
+
+  test:
+    name: unit tests (fork packages)
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+      - name: go test (consensus/fork packages)
+        run: |
+          go test \
+            ./core/ \
+            ./core/types/... \
+            ./core/vm/... \
+            ./core/state/... \
+            ./rpc/... \
+            ./internal/ethapi/... \
+            ./crypto/...
+
+  race:
+    name: race detector (concurrency-sensitive packages)
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+      - name: go test -race
+        # core/types carries the FeeRefundActive atomic flag (audit H1); rpc
+        # carries the batch/concurrency limiter. These are the places where a
+        # data race would be consensus- or DoS-relevant.
+        run: |
+          go test -race \
+            ./core/types/... \
+            ./core/state/... \
+            ./core/vm/... \
+            ./rpc/...
