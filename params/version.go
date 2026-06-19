@@ -29,7 +29,7 @@ var (
 	// tracks the VinuChain release tag. It is a display string only — it is not
 	// parsed for any consensus or protocol decision. Keep in sync with the
 	// release tag (see README "Versioning").
-	VersionMeta = "vinu-v1.20.24-quota"
+	VersionMeta = "vinu-v1.20.25-quota"
 )
 
 // Version holds the textual version string.
