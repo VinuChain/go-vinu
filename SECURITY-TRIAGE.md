@@ -21,11 +21,12 @@ devp2p and snap peer input is reachable.
 | CVE-2026-26314 | v1.16.9 | Applied on the supported Linux/CGO path: `BitCurve.IsOnCurve` rejects non-canonical coordinates and the C scalar multiplier checks field parsing; focused tests cover coordinates at the field prime. |
 | CVE-2026-26315 | v1.16.9 | Applied in `407a9c5ca`: ECIES validates peer coordinates before ECDH; off-curve and nil-coordinate regression tests cover it. |
 
-The effective fork version and the left-hand `github.com/ethereum/go-ethereum`
-requirement serve different tools. Go builds use the explicit `replace` to
-`github.com/VinuChain/go-vinu`; the left-hand version records the audited
-upstream advisory floor so Dependabot does not report fixes already present or
-proved inapplicable in the fork.
+In the consumer module `VinuChain/VinuChain`, the effective fork version and
+the left-hand `github.com/ethereum/go-ethereum` requirement serve different
+tools: its `go.mod` uses an explicit `replace` to `github.com/VinuChain/go-vinu`,
+while the left-hand version records the audited upstream advisory floor for
+Dependabot. This repository itself retains geth's module path and has no such
+replacement.
 
 These patches affect unauthenticated network parsing only. They do not change
 the EVM, state transition, receipt encoding, chain rules, activation heights,
@@ -35,11 +36,14 @@ Release binaries require Linux/CGO. The inherited non-CGO signature backend
 does not compile against the current btcec dependency and is not a supported
 VinuChain build target; no advisory disposition relies on it.
 
-The separate `FeeRefundActive` audit concern was checked in the consumer. The
-node initializes it from stored rules and changes it in the serialized epoch
-seal path where Podgorica becomes effective. Pre-activation receipts have nil
-refunds, whose encoding is identical in either flag state. VinuChain's runtime
-activation and receipt-root tests pin that transition.
+The generic `FeeRefundActive` torn-root interleaving remains real and covered by
+a stress test. It is not reachable in VinuChain's release path: mainnet already
+has Podgorica active, so an upgrade starts with the flag true and never changes
+it. A fresh activation has one monotonic false-to-true change in the serialized
+epoch seal before block dispatch and before any non-zero refund receipt can
+exist; all earlier refunds are nil or zero and encode identically. A second
+writer, reverse transition, or post-dispatch activation would require a code
+fix; the consumer's activation-order tests pin the current invariant.
 
 Two full-package p2p tests (`TestServerSetupConn` and `TestServerPeerLimits`)
 remain inherited timing/order flakes. CI runs the deterministic peer security
