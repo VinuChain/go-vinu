@@ -58,6 +58,13 @@ func TestToECDSAErrors(t *testing.T) {
 	}
 }
 
+func TestS256RejectsCoordinatesAboveP(t *testing.T) {
+	curve := S256()
+	if curve.IsOnCurve(curve.Params().P, curve.Params().Gy) {
+		t.Fatal("S256 accepted coordinate at field prime")
+	}
+}
+
 func BenchmarkSha3(b *testing.B) {
 	a := []byte("hello world")
 	for i := 0; i < b.N; i++ {

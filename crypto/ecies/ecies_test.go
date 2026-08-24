@@ -234,6 +234,30 @@ func TestEncryptDecrypt(t *testing.T) {
 	}
 }
 
+func TestDecryptRejectsShortCiphertext(t *testing.T) {
+	prv, err := GenerateKey(rand.Reader, DefaultCurve, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eph, err := GenerateKey(rand.Reader, DefaultCurve, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	params := ParamsFromCurve(DefaultCurve)
+	z, err := eph.GenerateShared(&prv.PublicKey, params.KeyLen, params.KeyLen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, km := deriveKeys(params.Hash(), z, nil, params.KeyLen)
+	em := make([]byte, params.BlockSize-1)
+	pub := elliptic.Marshal(DefaultCurve, eph.PublicKey.X, eph.PublicKey.Y)
+	ciphertext := append(append(pub, em...), messageTag(params.Hash, km, em, nil)...)
+
+	if _, err := prv.Decrypt(ciphertext, nil, nil); err != ErrInvalidMessage {
+		t.Fatalf("Decrypt returned %v, want ErrInvalidMessage", err)
+	}
+}
+
 func TestDecryptShared2(t *testing.T) {
 	prv, err := GenerateKey(rand.Reader, DefaultCurve, nil)
 	if err != nil {
@@ -471,8 +495,8 @@ func TestGenerateShared_RejectsNilCoordinates(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name    string
-		x, y    *big.Int
+		name string
+		x, y *big.Int
 	}{
 		{"nil X", nil, big.NewInt(1)},
 		{"nil Y", big.NewInt(1), nil},

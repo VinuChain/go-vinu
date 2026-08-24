@@ -39,7 +39,7 @@ jobs:
       - name: go build ./...
         run: go build ./...
       - name: go vet (fork-touched packages)
-        run: go vet ./core/... ./rpc/... ./internal/ethapi/... ./crypto/...
+        run: go vet ./core/... ./rpc/... ./internal/ethapi/... ./crypto/... ./eth/protocols/snap
 
   test:
     name: unit tests (fork packages)
@@ -64,6 +64,8 @@ jobs:
       - name: go test (p2p security regression — targeted; full ./p2p has fork-inherited flaky tests)
         run: |
           go test ./p2p -run 'TestPeerPing|TestPeerPingFlood|TestPeerDisconnect'
+      - name: go test (snap response memory bounds)
+        run: go test ./eth/protocols/snap -run 'TestDecodeResponseListLimits|TestDecodeTrieNodePathsLimits'
 
   race:
     name: race detector (concurrency-sensitive packages)

@@ -133,17 +133,14 @@ func TestReceiptRoot_StableForFixedFlag(t *testing.T) {
 // even be encoded under different flag values (EncodeIndex is called per-index),
 // producing a root that matches NEITHER the pre- nor the post-epoch root.
 //
-// This test PASSES today only because it asserts the hazard exists; it documents
-// the precise unsafe interleaving so that any future change which makes the flag
-// flip mid-derivation is caught. The SAFE operating contract is therefore:
-//
-//	FeeRefundActive MUST be set exactly once, before any block import/replay/RPC
-//	derivation begins, and MUST NOT be flipped while the process is live.
-//
-// If the consumer node instead flips the flag at the Podgorica block boundary
-// mid-process, historical receipt re-encodes (sync, re-org, replay, RPC
-// receipt-root checks) become non-deterministic. That is the unsafe design the
-// audit flags; this test is the executable evidence for it.
+// This test PASSES today only because it asserts the generic hazard exists. A
+// consumer must not change the flag while roots containing non-zero refunds can
+// be derived. VinuChain's sole live transition is the narrower safe case: a
+// monotonic false-to-true change in the serialized epoch seal, before dispatch
+// of the first block eligible to produce a non-zero refund. All earlier refunds
+// are nil or zero, so their encoding is identical in either state. A second
+// writer, a reverse transition, or moving activation after block dispatch would
+// violate that operating contract; this test preserves evidence of why.
 func TestReceiptRoot_ConcurrentFlagFlipObservesWrongEpoch(t *testing.T) {
 	saveAndRestoreFeeRefundActive(t)
 
