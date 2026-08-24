@@ -81,7 +81,19 @@ func TestDecodeTrieNodePathsLimits(t *testing.T) {
 		t.Fatalf("decodeTrieNodePaths returned %v, want path-set error", err)
 	}
 
-	tooManyPaths, err := rlp.EncodeToBytes([]TrieNodePathSet{make(TrieNodePathSet, maxTrieNodeLookups+1)})
+	validMax := make([]TrieNodePathSet, maxTrieNodeLookups)
+	for i := range validMax {
+		validMax[i] = TrieNodePathSet{nil, nil}
+	}
+	raw, err = rlp.EncodeToBytes(validMax)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decodeTrieNodePaths(raw); err != nil {
+		t.Fatalf("decodeTrieNodePaths rejected valid maximum: %v", err)
+	}
+
+	tooManyPaths, err := rlp.EncodeToBytes([]TrieNodePathSet{make(TrieNodePathSet, maxPathSegments+1)})
 	if err != nil {
 		t.Fatal(err)
 	}
