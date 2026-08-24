@@ -278,3 +278,11 @@ func TestIsOnCurve_RejectsCoordinatesAboveP(t *testing.T) {
 		t.Error("IsOnCurve accepted (Gx, P): coordinate equal to P not rejected")
 	}
 }
+
+func TestScalarMultRejectsCoordinatesAboveP(t *testing.T) {
+	curve := S256()
+	x, y := curve.ScalarMult(curve.Params().P, curve.Params().Gy, []byte{1})
+	if x != nil || y != nil {
+		t.Fatalf("ScalarMult accepted coordinate at field prime: (%v, %v)", x, y)
+	}
+}

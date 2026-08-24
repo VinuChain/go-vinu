@@ -56,6 +56,7 @@ const (
 	// at the remote side, which means all the work is in vain.
 	maxTrieNodeTimeSpent = 5 * time.Second
 
+	maxResponseBytes = softResponseLimit + softResponseLimit/10
 	maxResponseItems = softResponseLimit / common.HashLength
 	maxProofNodes    = 128
 )
@@ -68,8 +69,8 @@ func decodeResponseList(raw rlp.RawValue, maxItems int, out interface{}) error {
 	if len(rest) != 0 {
 		return fmt.Errorf("trailing data")
 	}
-	if len(content) > softResponseLimit {
-		return fmt.Errorf("encoded size %d exceeds %d", len(content), softResponseLimit)
+	if len(content) > maxResponseBytes {
+		return fmt.Errorf("encoded size %d exceeds %d", len(content), maxResponseBytes)
 	}
 	items, err := rlp.CountValues(content)
 	if err != nil {
@@ -79,6 +80,48 @@ func decodeResponseList(raw rlp.RawValue, maxItems int, out interface{}) error {
 		return fmt.Errorf("item count %d exceeds %d", items, maxItems)
 	}
 	return rlp.DecodeBytes(raw, out)
+}
+
+func decodeTrieNodePaths(raw rlp.RawValue) ([]TrieNodePathSet, error) {
+	content, rest, err := rlp.SplitList(raw)
+	if err != nil {
+		return nil, err
+	}
+	if len(rest) != 0 {
+		return nil, fmt.Errorf("trailing data")
+	}
+	var (
+		paths    []TrieNodePathSet
+		segments int
+	)
+	for len(content) > 0 {
+		if len(paths) >= maxTrieNodeLookups {
+			return nil, fmt.Errorf("path set count exceeds %d", maxTrieNodeLookups)
+		}
+		kind, inner, next, err := rlp.Split(content)
+		if err != nil {
+			return nil, err
+		}
+		if kind != rlp.List {
+			return nil, rlp.ErrExpectedList
+		}
+		var pathset TrieNodePathSet
+		for len(inner) > 0 {
+			segments++
+			if segments > maxTrieNodeLookups {
+				return nil, fmt.Errorf("path count exceeds %d", maxTrieNodeLookups)
+			}
+			path, rest, err := rlp.SplitString(inner)
+			if err != nil {
+				return nil, err
+			}
+			pathset = append(pathset, path)
+			inner = rest
+		}
+		paths = append(paths, pathset)
+		content = next
+	}
+	return paths, nil
 }
 
 // Handler is a callback to invoke from an outside runner after the boilerplate
@@ -483,10 +526,20 @@ func handleMessage(backend Backend, peer *Peer) error {
 
 	case msg.Code == GetTrieNodesMsg:
 		// Decode trie node retrieval request
-		var req GetTrieNodesPacket
-		if err := msg.Decode(&req); err != nil {
+		var raw struct {
+			ID    uint64
+			Root  common.Hash
+			Paths rlp.RawValue
+			Bytes uint64
+		}
+		if err := msg.Decode(&raw); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
+		paths, err := decodeTrieNodePaths(raw.Paths)
+		if err != nil {
+			return fmt.Errorf("%w: trie node paths: %v", errDecode, err)
+		}
+		req := GetTrieNodesPacket{ID: raw.ID, Root: raw.Root, Paths: paths, Bytes: raw.Bytes}
 		if req.Bytes > softResponseLimit {
 			req.Bytes = softResponseLimit
 		}

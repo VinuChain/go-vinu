@@ -17,8 +17,8 @@ devp2p and snap peer input is reachable.
 | CVE-2024-32972 | v1.13.15 | Not applicable: the vulnerable `GetHeadersFrom(num+count-1, count-1)` optimization does not exist; the inherited loop returns immediately for `Amount == 0`. The geth `eth` protocol is also not registered by VinuChain. |
 | CVE-2026-22862 | v1.16.8 | Applied: ECIES rejects ciphertext shorter than the public key, MAC, and AES block before slicing the IV; `TestDecryptRejectsShortCiphertext` covers it. |
 | CVE-2026-22868 | v1.16.8 | Not applicable: this fork has no blob transaction implementation or KZG verifier, rejects type `0x03` in both full and light transaction pools, and VinuChain does not use geth's transaction fetcher. |
-| CVE-2026-26313 | v1.17.0 | Applied to the reachable snap protocol: response lists remain raw until their encoded byte and item counts are bounded; `TestDecodeResponseListLimits` covers both limits. The unregistered geth `eth` handlers need no backport. |
-| CVE-2026-26314 | v1.16.9 | Applied in `e67de77a2`: `BitCurve.IsOnCurve` rejects nil, negative, and non-canonical coordinates; its regression test covers coordinates at and above the field prime. |
+| CVE-2026-26313 | v1.17.0 | Applied to the reachable snap protocol: response lists and nested trie-node request paths remain raw until their encoded byte and item counts are bounded; focused tests cover each limit. The unregistered geth `eth` handlers need no backport. |
+| CVE-2026-26314 | v1.16.9 | Applied on the supported Linux/CGO path: `BitCurve.IsOnCurve` rejects non-canonical coordinates and the C scalar multiplier checks field parsing; focused tests cover coordinates at the field prime. |
 | CVE-2026-26315 | v1.16.9 | Applied in `407a9c5ca`: ECIES validates peer coordinates before ECDH; off-curve and nil-coordinate regression tests cover it. |
 
 The effective fork version and the left-hand `github.com/ethereum/go-ethereum`
@@ -30,6 +30,10 @@ proved inapplicable in the fork.
 These patches affect unauthenticated network parsing only. They do not change
 the EVM, state transition, receipt encoding, chain rules, activation heights,
 or protocol capability names.
+
+Release binaries require Linux/CGO. The inherited non-CGO signature backend
+does not compile against the current btcec dependency and is not a supported
+VinuChain build target; no advisory disposition relies on it.
 
 The separate `FeeRefundActive` audit concern was checked in the consumer. The
 node initializes it from stored rules and changes it in the serialized epoch
