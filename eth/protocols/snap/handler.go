@@ -55,7 +55,31 @@ const (
 	// If we spend too much time, then it's a fairly high chance of timing out
 	// at the remote side, which means all the work is in vain.
 	maxTrieNodeTimeSpent = 5 * time.Second
+
+	maxResponseItems = softResponseLimit / common.HashLength
+	maxProofNodes    = 128
 )
+
+func decodeResponseList(raw rlp.RawValue, maxItems int, out interface{}) error {
+	content, rest, err := rlp.SplitList(raw)
+	if err != nil {
+		return err
+	}
+	if len(rest) != 0 {
+		return fmt.Errorf("trailing data")
+	}
+	if len(content) > softResponseLimit {
+		return fmt.Errorf("encoded size %d exceeds %d", len(content), softResponseLimit)
+	}
+	items, err := rlp.CountValues(content)
+	if err != nil {
+		return err
+	}
+	if items > maxItems {
+		return fmt.Errorf("item count %d exceeds %d", items, maxItems)
+	}
+	return rlp.DecodeBytes(raw, out)
+}
 
 // Handler is a callback to invoke from an outside runner after the boilerplate
 // exchanges have passed.
@@ -233,9 +257,20 @@ func handleMessage(backend Backend, peer *Peer) error {
 
 	case msg.Code == AccountRangeMsg:
 		// A range of accounts arrived to one of our previous requests
-		res := new(AccountRangePacket)
-		if err := msg.Decode(res); err != nil {
+		var raw struct {
+			ID       uint64
+			Accounts rlp.RawValue
+			Proof    rlp.RawValue
+		}
+		if err := msg.Decode(&raw); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
+		}
+		res := &AccountRangePacket{ID: raw.ID}
+		if err := decodeResponseList(raw.Accounts, maxResponseItems, &res.Accounts); err != nil {
+			return fmt.Errorf("%w: account range: %v", errDecode, err)
+		}
+		if err := decodeResponseList(raw.Proof, maxProofNodes, &res.Proof); err != nil {
+			return fmt.Errorf("%w: account proof: %v", errDecode, err)
 		}
 		// Ensure the range is monotonically increasing
 		for i := 1; i < len(res.Accounts); i++ {
@@ -366,9 +401,20 @@ func handleMessage(backend Backend, peer *Peer) error {
 
 	case msg.Code == StorageRangesMsg:
 		// A range of storage slots arrived to one of our previous requests
-		res := new(StorageRangesPacket)
-		if err := msg.Decode(res); err != nil {
+		var raw struct {
+			ID    uint64
+			Slots rlp.RawValue
+			Proof rlp.RawValue
+		}
+		if err := msg.Decode(&raw); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
+		}
+		res := &StorageRangesPacket{ID: raw.ID}
+		if err := decodeResponseList(raw.Slots, maxResponseItems, &res.Slots); err != nil {
+			return fmt.Errorf("%w: storage ranges: %v", errDecode, err)
+		}
+		if err := decodeResponseList(raw.Proof, maxProofNodes, &res.Proof); err != nil {
+			return fmt.Errorf("%w: storage proof: %v", errDecode, err)
 		}
 		// Ensure the ranges are monotonically increasing
 		for i, slots := range res.Slots {
@@ -420,9 +466,16 @@ func handleMessage(backend Backend, peer *Peer) error {
 
 	case msg.Code == ByteCodesMsg:
 		// A batch of byte codes arrived to one of our previous requests
-		res := new(ByteCodesPacket)
-		if err := msg.Decode(res); err != nil {
+		var raw struct {
+			ID    uint64
+			Codes rlp.RawValue
+		}
+		if err := msg.Decode(&raw); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
+		}
+		res := &ByteCodesPacket{ID: raw.ID}
+		if err := decodeResponseList(raw.Codes, maxCodeLookups, &res.Codes); err != nil {
+			return fmt.Errorf("%w: byte codes: %v", errDecode, err)
 		}
 		requestTracker.Fulfil(peer.id, peer.version, ByteCodesMsg, res.ID)
 
@@ -515,9 +568,16 @@ func handleMessage(backend Backend, peer *Peer) error {
 
 	case msg.Code == TrieNodesMsg:
 		// A batch of trie nodes arrived to one of our previous requests
-		res := new(TrieNodesPacket)
-		if err := msg.Decode(res); err != nil {
+		var raw struct {
+			ID    uint64
+			Nodes rlp.RawValue
+		}
+		if err := msg.Decode(&raw); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
+		}
+		res := &TrieNodesPacket{ID: raw.ID}
+		if err := decodeResponseList(raw.Nodes, maxTrieNodeLookups, &res.Nodes); err != nil {
+			return fmt.Errorf("%w: trie nodes: %v", errDecode, err)
 		}
 		requestTracker.Fulfil(peer.id, peer.version, TrieNodesMsg, res.ID)
 
