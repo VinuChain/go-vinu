@@ -279,10 +279,18 @@ func TestIsOnCurve_RejectsCoordinatesAboveP(t *testing.T) {
 	}
 }
 
-func TestScalarMultRejectsCoordinatesAboveP(t *testing.T) {
+func TestScalarMultRejectsNonCanonicalCoordinates(t *testing.T) {
 	curve := S256()
-	x, y := curve.ScalarMult(curve.Params().P, curve.Params().Gy, []byte{1})
-	if x != nil || y != nil {
-		t.Fatalf("ScalarMult accepted coordinate at field prime: (%v, %v)", x, y)
+	overflow := new(big.Int).Lsh(big.NewInt(1), 256)
+	overflow.Add(overflow, curve.Params().Gx)
+	for name, inputX := range map[string]*big.Int{
+		"field prime": curve.Params().P,
+		"truncated":   overflow,
+		"negative":    new(big.Int).Neg(curve.Params().Gx),
+	} {
+		x, y := curve.ScalarMult(inputX, curve.Params().Gy, []byte{1})
+		if x != nil || y != nil {
+			t.Fatalf("ScalarMult accepted %s coordinate: (%v, %v)", name, x, y)
+		}
 	}
 }

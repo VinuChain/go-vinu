@@ -100,4 +100,20 @@ func TestDecodeTrieNodePathsLimits(t *testing.T) {
 	if _, err := decodeTrieNodePaths(tooManyPaths); err == nil || !strings.Contains(err.Error(), "path count") {
 		t.Fatalf("decodeTrieNodePaths returned %v, want path-count error", err)
 	}
+
+	validPath, err := rlp.EncodeToBytes([]TrieNodePathSet{{make([]byte, maxPathSize)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decodeTrieNodePaths(validPath); err != nil {
+		t.Fatalf("decodeTrieNodePaths rejected maximum path length: %v", err)
+	}
+
+	tooLong, err := rlp.EncodeToBytes([]TrieNodePathSet{{make([]byte, maxPathSize+1)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decodeTrieNodePaths(tooLong); err == nil || !strings.Contains(err.Error(), "path length") {
+		t.Fatalf("decodeTrieNodePaths returned %v, want path-length error", err)
+	}
 }

@@ -59,6 +59,7 @@ const (
 	maxResponseBytes = softResponseLimit + softResponseLimit/10
 	maxResponseItems = softResponseLimit / common.HashLength
 	maxPathSegments  = 2 * maxTrieNodeLookups
+	maxPathSize      = common.HashLength + 1
 	maxProofNodes    = 128
 )
 
@@ -115,6 +116,9 @@ func decodeTrieNodePaths(raw rlp.RawValue) ([]TrieNodePathSet, error) {
 			path, rest, err := rlp.SplitString(inner)
 			if err != nil {
 				return nil, err
+			}
+			if len(path) > maxPathSize {
+				return nil, fmt.Errorf("path length %d exceeds %d", len(path), maxPathSize)
 			}
 			pathset = append(pathset, path)
 			inner = rest
